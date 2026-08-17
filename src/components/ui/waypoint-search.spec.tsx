@@ -17,8 +17,9 @@ vi.mock('react-map-gl/maplibre', () => ({
 vi.mock('@/stores/common-store', () => ({
   useCommonStore: vi.fn((selector) =>
     selector({
-      settings: {
-        use_geocoding: false,
+      shared: {
+        values: { use_geocoding: false },
+        enabled: {},
       },
     })
   ),

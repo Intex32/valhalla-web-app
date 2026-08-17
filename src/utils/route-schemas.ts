@@ -10,13 +10,10 @@ const languageValues = languageOptions.map((opt) => opt.value) as [
 ];
 const languageEnum = z.enum(languageValues);
 
-const willingness = z
-  .number()
-  .min(0)
-  .max(1)
-  .refine((v) => [0, 0.5, 1].includes(v), {
-    message: 'must be 0, 0.5, or 1',
-  });
+// Valhalla accepts any willingness in 0..1. The QuickSettings buttons only
+// produce 0 / 0.5 / 1, but the advanced panel exposes the same params as
+// 0.1-step sliders, so the permalink has to carry whatever the slider lands on.
+const willingness = z.number().min(0).max(1);
 
 // Kept as a raw string rather than an array so the URL stays readable
 // (`?profile=car,emergency`); use `parseProfiles` to get the list back.
@@ -33,10 +30,11 @@ export const searchParamsSchema = z.object({
   generalize: z.number().optional(),
   denoise: z.number().optional(),
   style: mapStyleSchema.optional(),
-  use_ferry: willingness.optional(),
-  use_highways: willingness.optional(),
-  use_tolls: willingness.optional(),
-  alternates: z.number().int().min(0).max(5).optional(),
+  // Dropped rather than fatal when a hand-edited permalink is out of range.
+  use_ferry: fallback(willingness.optional(), undefined),
+  use_highways: fallback(willingness.optional(), undefined),
+  use_tolls: fallback(willingness.optional(), undefined),
+  alternates: fallback(z.number().int().min(0).max(5).optional(), undefined),
   lang: languageEnum.optional(),
 });
 

@@ -14,7 +14,7 @@ import {
   VALHALLA_CLIENT_HEADERS,
 } from '@/utils/valhalla';
 import { forward_geocode, parseGeocodeResponse } from '@/utils/nominatim';
-import { filterProfileSettings } from '@/utils/filter-profile-settings';
+import { buildCostingOptions } from '@/utils/build-costing-options';
 import { getDirectionsLanguage } from '@/utils/directions-language';
 import { useCommonStore, type Profile } from '@/stores/common-store';
 import {
@@ -32,8 +32,8 @@ async function fetchDirectionsForProfile(
   profile: Profile,
   activeWaypoints: ActiveWaypoint[]
 ): Promise<ParsedDirectionsGeometry> {
-  const { dateTime, settings: rawSettings } = useCommonStore.getState();
-  const settings = filterProfileSettings(profile, rawSettings);
+  const { dateTime, shared, perProfile } = useCommonStore.getState();
+  const settings = buildCostingOptions(profile, { shared, perProfile });
   const language = getDirectionsLanguage();
 
   const valhallaRequest = buildDirectionsRequest({

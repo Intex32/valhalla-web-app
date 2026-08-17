@@ -84,6 +84,48 @@ describe('route-schemas', () => {
       });
     });
 
+    describe('willingness fields', () => {
+      const params = ['use_ferry', 'use_highways', 'use_tolls'] as const;
+
+      it('should accept the values the quick-settings buttons produce', () => {
+        for (const param of params) {
+          for (const value of [0, 0.5, 1]) {
+            expect(searchParamsSchema.parse({ [param]: value })[param]).toBe(
+              value
+            );
+          }
+        }
+      });
+
+      it('should accept any 0.1 step the advanced sliders can land on', () => {
+        for (const param of params) {
+          for (const value of [0.1, 0.3, 0.7, 0.9]) {
+            expect(searchParamsSchema.parse({ [param]: value })[param]).toBe(
+              value
+            );
+          }
+        }
+      });
+
+      it('should drop out-of-range values instead of throwing', () => {
+        for (const param of params) {
+          expect(
+            searchParamsSchema.parse({ [param]: 1.5 })[param]
+          ).toBeUndefined();
+          expect(
+            searchParamsSchema.parse({ [param]: -1 })[param]
+          ).toBeUndefined();
+        }
+      });
+
+      it('should drop an out-of-range alternates instead of throwing', () => {
+        expect(
+          searchParamsSchema.parse({ alternates: 99 }).alternates
+        ).toBeUndefined();
+        expect(searchParamsSchema.parse({ alternates: 3 }).alternates).toBe(3);
+      });
+    });
+
     describe('combined params', () => {
       it('should parse complete valid search params', () => {
         const params = {

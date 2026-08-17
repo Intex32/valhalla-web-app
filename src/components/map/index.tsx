@@ -95,7 +95,7 @@ export const MapComponent = () => {
     (state) => state.directionsPanelOpen
   );
   const toggleDirections = useCommonStore((state) => state.toggleDirections);
-  const updateSettings = useCommonStore((state) => state.updateSettings);
+  const updateSettings = useCommonStore((state) => state.updateSharedSetting);
   const setMapReady = useCommonStore((state) => state.setMapReady);
   const { style } = useSearch({ from: '/$activeTab' });
   const [showInfoPopup, setShowInfoPopup] = useState(false);

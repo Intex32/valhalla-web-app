@@ -15,7 +15,6 @@ import {
 } from './ui/tooltip';
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 import { useCallback } from 'react';
-import { useCommonStore } from '@/stores/common-store';
 import { Loader2 } from 'lucide-react';
 import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
 import { getProfileColor } from '@/utils/profile-colors';
@@ -52,7 +51,6 @@ export const ProfilePicker = ({
   loading,
   onProfileChange,
 }: ProfilePickerProps) => {
-  const resetSettings = useCommonStore((state) => state.resetSettings);
   const selectedProfiles = useSelectedProfiles();
 
   const handleUpdateProfiles = useCallback(
@@ -61,15 +59,11 @@ export const ProfilePicker = ({
       // would leave nothing to route with.
       if (next.length === 0) return;
 
-      // `settings` holds the primary profile's option set, so it is only reset
-      // when the primary actually changes. Adding or dropping a profile to
-      // compare against must not discard the tuning the user already did.
-      if (next[0] !== selectedProfiles[0]) {
-        resetSettings(next[0]!);
-      }
+      // Each profile keeps its own costing options, so changing the selection
+      // never has to discard anything the user has tuned.
       onProfileChange(next);
     },
-    [resetSettings, onProfileChange, selectedProfiles]
+    [onProfileChange]
   );
 
   return (

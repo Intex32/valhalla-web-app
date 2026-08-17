@@ -23,12 +23,55 @@ export const profileEnum = z.enum([
 
 export type Profile = z.infer<typeof profileEnum>;
 
+/**
+ * A bag of costing values plus the set of options the user has opted into
+ * sending. Anything not enabled is omitted from `costing_options` entirely, so
+ * Valhalla applies its own per-costing default instead of ours.
+ */
+export interface ScopedSettings {
+  values: PossibleSettings;
+  enabled: Record<string, boolean>;
+}
+
+const createScope = (
+  base: PossibleSettings = settingsInit
+): ScopedSettings => ({
+  values: { ...base },
+  enabled: {},
+});
+
+const seedFor = (profile: Profile): PossibleSettings =>
+  profile === 'truck' ? settingsInitTruckOverride : settingsInit;
+
+// One stable fallback per profile, so reading a scope the user hasn't touched
+// yet doesn't hand React a new object on every render.
+const untouchedScopes = new Map<Profile, ScopedSettings>();
+
+/** A profile's own scope, seeded on read so the panel renders before any edit. */
+export const getProfileScope = (
+  perProfile: Partial<Record<Profile, ScopedSettings>>,
+  profile: Profile
+): ScopedSettings => {
+  const edited = perProfile[profile];
+  if (edited) return edited;
+
+  let untouched = untouchedScopes.get(profile);
+  if (!untouched) {
+    untouched = createScope(seedFor(profile));
+    untouchedScopes.set(profile, untouched);
+  }
+  return untouched;
+};
+
 interface CommonState {
   settingsPanelOpen: boolean;
   directionsPanelOpen: boolean;
   coordinates: number[][];
   loading: boolean;
-  settings: PossibleSettings;
+  /** General costing options, applied to every profile that understands them. */
+  shared: ScopedSettings;
+  /** Options a profile owns privately; these win over the shared value. */
+  perProfile: Partial<Record<Profile, ScopedSettings>>;
   dateTime: { type: number; value: string };
   mapReady: boolean;
 }
@@ -38,11 +81,23 @@ interface CommonActions {
   zoomTo: (coordinates: number[][]) => void;
   toggleSettings: () => void;
   toggleDirections: () => void;
-  updateSettings: (
-    name: keyof PossibleSettings,
+  /** Sets a shared value and opts it in — editing a setting means wanting it sent. */
+  updateSharedSetting: (
+    param: keyof PossibleSettings,
     value: PossibleSettings[keyof PossibleSettings]
   ) => void;
-  resetSettings: (profile: Profile) => void;
+  setSharedEnabled: (param: string, enabled: boolean) => void;
+  updateProfileSetting: (
+    profile: Profile,
+    param: keyof PossibleSettings,
+    value: PossibleSettings[keyof PossibleSettings]
+  ) => void;
+  setProfileEnabled: (
+    profile: Profile,
+    param: string,
+    enabled: boolean
+  ) => void;
+  resetSettings: (profiles: Profile[]) => void;
   updateDateTime: (key: 'type' | 'value', value: string | number) => void;
   setMapReady: (ready: boolean) => void;
 }
@@ -60,7 +115,8 @@ export const useCommonStore = create<CommonStore>()(
       directionsPanelOpen: DEFAULT_PANEL_OPEN,
       coordinates: [],
       loading: false,
-      settings: { ...settingsInit },
+      shared: createScope(),
+      perProfile: {},
       dateTime: {
         type: -1,
         value: new Date().toISOString().slice(0, 16),
@@ -86,27 +142,69 @@ export const useCommonStore = create<CommonStore>()(
           undefined,
           'toggleDirections'
         ),
-      updateSettings: (name, value) =>
+      updateSharedSetting: (param, value) =>
         set(
           (state) => {
-            state.settings[name] = value;
+            state.shared.values[param] = value;
+            // Touching a control is the user asking for that value to be used,
+            // so it opts itself in rather than needing a second click.
+            state.shared.enabled[param] = true;
           },
           undefined,
-          'updateSettings'
+          'updateSharedSetting'
         ),
-      resetSettings: (profile) =>
+
+      setSharedEnabled: (param, enabled) =>
         set(
           (state) => {
-            const base =
-              profile === 'truck' ? settingsInitTruckOverride : settingsInit;
-            // Preserve quick-panel params — they're treated as cross-profile
-            // user preferences (URL-permalinked) and shouldn't be wiped on a
-            // profile change or an explicit Reset.
+            // The value is left in place so unchecking and re-checking restores
+            // what the user had dialled in.
+            state.shared.enabled[param] = enabled;
+          },
+          undefined,
+          'setSharedEnabled'
+        ),
+
+      updateProfileSetting: (profile, param, value) =>
+        set(
+          (state) => {
+            state.perProfile[profile] ??= createScope(seedFor(profile));
+            state.perProfile[profile].values[param] = value;
+            state.perProfile[profile].enabled[param] = true;
+          },
+          undefined,
+          'updateProfileSetting'
+        ),
+
+      setProfileEnabled: (profile, param, enabled) =>
+        set(
+          (state) => {
+            state.perProfile[profile] ??= createScope(seedFor(profile));
+            state.perProfile[profile].enabled[param] = enabled;
+          },
+          undefined,
+          'setProfileEnabled'
+        ),
+
+      resetSettings: (profiles) =>
+        set(
+          (state) => {
+            // Quick-panel params are cross-profile user preferences carried in
+            // the URL, so a reset of the advanced panel leaves them alone.
             const preserved: Partial<PossibleSettings> = {};
+            const preservedEnabled: Record<string, boolean> = {};
             for (const param of QUICK_SETTING_PARAMS) {
-              preserved[param] = state.settings[param];
+              preserved[param] = state.shared.values[param];
+              preservedEnabled[param] = state.shared.enabled[param] ?? false;
             }
-            state.settings = { ...base, ...preserved };
+
+            state.shared = {
+              values: { ...settingsInit, ...preserved },
+              enabled: preservedEnabled,
+            };
+            for (const profile of profiles) {
+              state.perProfile[profile] = createScope(seedFor(profile));
+            }
           },
           undefined,
           'resetSettings'

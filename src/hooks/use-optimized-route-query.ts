@@ -8,7 +8,7 @@ import {
   showValhallaWarnings,
   VALHALLA_CLIENT_HEADERS,
 } from '@/utils/valhalla';
-import { filterProfileSettings } from '@/utils/filter-profile-settings';
+import { buildCostingOptions } from '@/utils/build-costing-options';
 import { getPrimaryProfile, parseProfilesWithFallback } from '@/utils/profiles';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useCommonStore } from '@/stores/common-store';
@@ -26,7 +26,6 @@ export function useOptimizedRouteQuery() {
   const setIsOptimized = useDirectionsStore((state) => state.setIsOptimized);
   const zoomTo = useCommonStore((state) => state.zoomTo);
   const { refetch: refetchDirections } = useDirectionsQuery();
-  const { settings: rawSettings } = useCommonStore.getState();
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -50,7 +49,8 @@ export function useOptimizedRouteQuery() {
         router.state.location.search.profile
       );
       const profile = getPrimaryProfile(profiles);
-      const settings = filterProfileSettings(profile, rawSettings);
+      const { shared, perProfile } = useCommonStore.getState();
+      const settings = buildCostingOptions(profile, { shared, perProfile });
       const language = getDirectionsLanguage();
       const request = buildOptimizedRouteRequest({
         profile,

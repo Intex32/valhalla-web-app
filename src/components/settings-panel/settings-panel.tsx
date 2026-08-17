@@ -1,17 +1,21 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  profileSettings,
   generalSettings,
-  QUICK_SETTING_PARAMS,
+  getProfileSettingsGroup,
+  getSharedSettingsGroup,
+  REQUEST_LEVEL_PARAMS,
 } from './settings-options';
-import { filterProfileSettings } from '@/utils/filter-profile-settings';
+import { buildCostingOptions } from '@/utils/build-costing-options';
 import type { PossibleSettings } from '@/components/types';
 
-import { SliderSetting } from '@/components/ui/slider-setting';
 import { CheckboxSetting } from '@/components/ui/checkbox-setting';
-import { SelectSetting } from '@/components/ui/select-setting';
-import { useCommonStore, type Profile } from '@/stores/common-store';
+import { SettingsGroupFields } from './settings-group-fields';
+import {
+  useCommonStore,
+  getProfileScope,
+  type Profile,
+} from '@/stores/common-store';
 import {
   Sheet,
   SheetContent,
@@ -19,39 +23,50 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { X, Copy, RotateCcw, SlidersHorizontal, Settings2 } from 'lucide-react';
+import { X, Copy, RotateCcw, SlidersHorizontal, Share2 } from 'lucide-react';
 import { useParams } from '@tanstack/react-router';
 import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { ServerSettings } from '@/components/settings-panel/server-settings';
-import { MultiSelectSetting } from '../ui/multiselect-setting';
+import { getProfileColor } from '@/utils/profile-colors';
+import { getProfileLabel } from '@/utils/profiles';
 
-type ProfileWithSettings = Exclude<Profile, 'auto'>;
-
-const QUICK_SETTING_PARAM_SET: Set<string> = new Set(QUICK_SETTING_PARAMS);
+// Everything else keeps a checkbox here — including the willingness params the
+// QuickSettings buttons also write, since those buttons have no "leave at the
+// server default" state and this panel is where that is controlled.
+const OMITTED_PARAMS: ReadonlySet<string> = new Set(REQUEST_LEVEL_PARAMS);
 
 export const SettingsPanel = () => {
   const selectedProfiles = useSelectedProfiles();
-  // The advanced panel shows one option set at a time: the primary profile's.
-  // Values are shared across profiles — `filterProfileSettings` hands each
-  // request only the options its own costing model understands.
-  const profile = selectedProfiles[0]!;
   const { activeTab } = useParams({ from: '/$activeTab' });
-  const settings = useCommonStore((state) => state.settings);
+  const shared = useCommonStore((state) => state.shared);
+  const perProfile = useCommonStore((state) => state.perProfile);
   const settingsPanelOpen = useCommonStore((state) => state.settingsPanelOpen);
-  const updateSettings = useCommonStore((state) => state.updateSettings);
+  const updateSharedSetting = useCommonStore(
+    (state) => state.updateSharedSetting
+  );
+  const setSharedEnabled = useCommonStore((state) => state.setSharedEnabled);
+  const updateProfileSetting = useCommonStore(
+    (state) => state.updateProfileSetting
+  );
+  const setProfileEnabled = useCommonStore((state) => state.setProfileEnabled);
   const resetSettings = useCommonStore((state) => state.resetSettings);
   const toggleSettings = useCommonStore((state) => state.toggleSettings);
   const [copied, setCopied] = useState(false);
   const { refetch: refetchDirections } = useDirectionsQuery();
   const { refetch: refetchIsochrones } = useIsochronesQuery();
 
-  const [profileSettingsOpen, setProfileSettingsOpen] = useState(true);
-  const [generalSettingsOpen, setGeneralSettingsOpen] = useState(true);
+  const [sharedOpen, setSharedOpen] = useState(true);
+  const [openProfiles, setOpenProfiles] = useState<Record<string, boolean>>({});
 
-  const handleMakeRequest = useCallback(() => {
+  const sharedGroup = useMemo(
+    () => getSharedSettingsGroup(selectedProfiles),
+    [selectedProfiles]
+  );
+
+  const makeRequest = useCallback(() => {
     if (activeTab === 'directions') {
       refetchDirections();
     } else {
@@ -59,47 +74,36 @@ export const SettingsPanel = () => {
     }
   }, [activeTab, refetchDirections, refetchIsochrones]);
 
-  const handleUpdateSettings = useCallback(
-    ({
-      name,
-      value,
-    }: {
-      name: keyof PossibleSettings;
-      value: PossibleSettings[keyof PossibleSettings];
-    }) => {
-      updateSettings(name, value);
-
-      if (activeTab === 'directions') {
-        refetchDirections();
-      } else {
-        refetchIsochrones();
-      }
-    },
-    [activeTab, updateSettings, refetchDirections, refetchIsochrones]
-  );
-
   const handleCopySettings = useCallback(async () => {
-    const text = JSON.stringify(
-      filterProfileSettings(profile as ProfileWithSettings, settings)
+    const payload = Object.fromEntries(
+      selectedProfiles.map((profile) => [
+        profile,
+        buildCostingOptions(profile, { shared, perProfile }).costing,
+      ])
     );
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
     setCopied(true);
     setTimeout(() => {
       setCopied(false);
     }, 1000);
-  }, [profile, settings]);
+  }, [selectedProfiles, shared, perProfile]);
 
-  const resetConfigSettings = useCallback(() => {
-    resetSettings(profile);
-    if (activeTab === 'directions') {
-      refetchDirections();
-    } else {
-      refetchIsochrones();
-    }
-  }, [activeTab, profile, resetSettings, refetchDirections, refetchIsochrones]);
+  const handleReset = useCallback(() => {
+    resetSettings(selectedProfiles);
+    makeRequest();
+  }, [resetSettings, selectedProfiles, makeRequest]);
 
-  const hasProfileSettings =
-    profileSettings[profile as ProfileWithSettings].boolean.length > 0;
+  const enabledCount = (enabled: Record<string, boolean>, params: string[]) =>
+    params.filter((param) => enabled[param]).length;
+
+  const sharedParams = [
+    ...sharedGroup.numeric,
+    ...sharedGroup.boolean,
+    ...sharedGroup.enum,
+    ...sharedGroup.list,
+  ]
+    .map((option) => option.param)
+    .filter((param) => !OMITTED_PARAMS.has(param));
 
   return (
     <Sheet open={settingsPanelOpen} modal={false}>
@@ -110,7 +114,7 @@ export const SettingsPanel = () => {
         <SheetHeader className="justify-between">
           <SheetTitle>Settings</SheetTitle>
           <SheetDescription className="sr-only">
-            Settings for the current profile
+            Costing options for the selected profiles
           </SheetDescription>
           <Button
             variant="ghost"
@@ -124,217 +128,64 @@ export const SettingsPanel = () => {
         <div className="px-3 space-y-3">
           <ServerSettings />
 
-          {selectedProfiles.length > 1 && (
-            <p className="text-muted-foreground text-xs">
-              Showing the option set of <strong>{profile}</strong>. These values
-              are shared by every selected profile — each request only receives
-              the options its own costing model supports.
-            </p>
-          )}
-
-          {hasProfileSettings && (
-            <CollapsibleSection
-              title="Profile Settings"
-              icon={SlidersHorizontal}
-              subtitle={`(${profile})`}
-              open={profileSettingsOpen}
-              onOpenChange={setProfileSettingsOpen}
-            >
-              <div className="space-y-1.25">
-                {profileSettings[profile as ProfileWithSettings].numeric.map(
-                  (option, key) => (
-                    <SliderSetting
-                      key={key}
-                      id={option.param}
-                      label={option.name}
-                      description={option.description}
-                      min={option.settings.min}
-                      max={option.settings.max}
-                      step={option.settings.step}
-                      value={(settings[option.param] as number) ?? 0}
-                      unit={option.unit}
-                      onValueChange={(values) => {
-                        updateSettings(option.param, values[0] ?? 0);
-                      }}
-                      onValueCommit={handleMakeRequest}
-                      onInputChange={(values) => {
-                        let value = values[0] ?? 0;
-                        if (isNaN(value)) value = option.settings.min;
-                        value = Math.max(
-                          option.settings.min,
-                          Math.min(value, option.settings.max)
-                        );
-                        handleUpdateSettings({
-                          name: option.param,
-                          value,
-                        });
-                      }}
-                    />
-                  )
-                )}
-                {profileSettings[profile as ProfileWithSettings].boolean.map(
-                  (option, key) => (
-                    <CheckboxSetting
-                      key={key}
-                      id={option.param}
-                      label={option.name}
-                      description={option.description}
-                      checked={Boolean(settings[option.param])}
-                      onCheckedChange={(checked) => {
-                        handleUpdateSettings({
-                          name: option.param,
-                          value: checked,
-                        });
-                      }}
-                    />
-                  )
-                )}
-                {profileSettings[profile as ProfileWithSettings].enum.map(
-                  (option, key) => (
-                    <SelectSetting
-                      key={key}
-                      id={option.param}
-                      label={option.name}
-                      description={option.description}
-                      placeholder={`Select ${option.name}`}
-                      value={settings[option.param] as string}
-                      options={option.enums}
-                      onValueChange={(value) => {
-                        handleUpdateSettings({
-                          name: option.param,
-                          value,
-                        });
-                      }}
-                    />
-                  )
-                )}
-                {profileSettings[profile as ProfileWithSettings].list.map(
-                  (option, key) => (
-                    <MultiSelectSetting
-                      key={key}
-                      id={option.param}
-                      label={option.name}
-                      description={option.description}
-                      value={
-                        (settings[option.param] as string[]) ?? ['current']
-                      }
-                      options={option.options}
-                      onValueChange={(value) => {
-                        handleUpdateSettings({
-                          name: option.param,
-                          value,
-                        });
-                      }}
-                    />
-                  )
-                )}
-              </div>
-            </CollapsibleSection>
-          )}
+          <p className="text-muted-foreground text-xs">
+            Only ticked options are sent to Valhalla. Everything else is left to
+            the server&apos;s own default for that costing model.
+          </p>
 
           <CollapsibleSection
-            title="General Settings"
-            icon={Settings2}
-            open={generalSettingsOpen}
-            onOpenChange={setGeneralSettingsOpen}
+            title="Shared settings"
+            icon={Share2}
+            subtitle={`(${enabledCount(shared.enabled, sharedParams).toString()}/${sharedParams.length.toString()})`}
+            open={sharedOpen}
+            onOpenChange={setSharedOpen}
           >
-            <div className="space-y-1.25">
-              {generalSettings[profile as ProfileWithSettings].numeric
-                .filter((option) => !QUICK_SETTING_PARAM_SET.has(option.param))
-                .map((option, key) => (
-                  <SliderSetting
-                    key={key}
-                    id={option.param}
-                    label={option.name}
-                    description={option.description}
-                    min={option.settings.min}
-                    max={option.settings.max}
-                    step={option.settings.step}
-                    value={(settings[option.param] as number) ?? 0}
-                    unit={option.unit}
-                    onValueChange={(values) => {
-                      updateSettings(option.param, values[0] ?? 0);
-                    }}
-                    onValueCommit={handleMakeRequest}
-                    onInputChange={(values) => {
-                      let value = values[0] ?? 0;
-                      if (isNaN(value)) value = option.settings.min;
-                      value = Math.max(
-                        option.settings.min,
-                        Math.min(value, option.settings.max)
-                      );
-                      handleUpdateSettings({
-                        name: option.param,
-                        value,
-                      });
-                    }}
-                  />
-                ))}
-              {generalSettings[profile as ProfileWithSettings].boolean.map(
-                (option, key) => (
-                  <CheckboxSetting
-                    key={key}
-                    id={option.param}
-                    label={option.name}
-                    description={option.description}
-                    checked={Boolean(settings[option.param])}
-                    onCheckedChange={(checked) => {
-                      handleUpdateSettings({
-                        name: option.param,
-                        value: checked,
-                      });
-                    }}
-                  />
-                )
-              )}
-              {generalSettings.all.boolean.map((option, key) => (
-                <CheckboxSetting
-                  key={key}
-                  id={option.param}
-                  label={option.name}
-                  description={option.description}
-                  checked={Boolean(settings[option.param])}
-                  onCheckedChange={(checked) => {
-                    handleUpdateSettings({
-                      name: option.param,
-                      value: checked,
-                    });
-                  }}
-                />
-              ))}
-              {generalSettings.all.numeric
-                .filter((option) => !QUICK_SETTING_PARAM_SET.has(option.param))
-                .map((option, key) => (
-                  <SliderSetting
-                    key={key}
-                    id={option.param}
-                    label={option.name}
-                    description={option.description}
-                    min={option.settings.min}
-                    max={option.settings.max}
-                    step={option.settings.step}
-                    value={(settings[option.param] as number) ?? 0}
-                    unit={option.unit}
-                    onValueChange={(values) => {
-                      updateSettings(option.param, values[0] ?? 0);
-                    }}
-                    onValueCommit={handleMakeRequest}
-                    onInputChange={(values) => {
-                      let value = values[0] ?? 0;
-                      if (isNaN(value)) value = option.settings.min;
-                      value = Math.max(
-                        option.settings.min,
-                        Math.min(value, option.settings.max)
-                      );
-                      handleUpdateSettings({
-                        name: option.param,
-                        value,
-                      });
-                    }}
-                  />
-                ))}
-            </div>
+            <SettingsGroupFields
+              group={sharedGroup}
+              values={shared.values}
+              enabled={shared.enabled}
+              omitParams={OMITTED_PARAMS}
+              onValueChange={updateSharedSetting}
+              onCommit={makeRequest}
+              onIncludedChange={(param, included) => {
+                setSharedEnabled(param, included);
+                makeRequest();
+              }}
+            />
+            {/* Client-side only, so it gets no include checkbox. */}
+            {generalSettings.all.boolean.map((option) => (
+              <CheckboxSetting
+                key={option.param}
+                id={option.param}
+                label={option.name}
+                description={option.description}
+                checked={Boolean(shared.values[option.param])}
+                onCheckedChange={(checked) => {
+                  updateSharedSetting(option.param, checked);
+                }}
+              />
+            ))}
           </CollapsibleSection>
+
+          {selectedProfiles.map((profile) => (
+            <ProfileSection
+              key={profile}
+              profile={profile}
+              open={openProfiles[profile] ?? true}
+              onOpenChange={(next) => {
+                setOpenProfiles((prev) => ({ ...prev, [profile]: next }));
+              }}
+              perProfile={perProfile}
+              onValueChange={(param, value) => {
+                updateProfileSetting(profile, param, value);
+              }}
+              onCommit={makeRequest}
+              onIncludedChange={(param, included) => {
+                setProfileEnabled(profile, param, included);
+                makeRequest();
+              }}
+            />
+          ))}
 
           <div className="flex gap-2 pt-1">
             <Button
@@ -346,7 +197,7 @@ export const SettingsPanel = () => {
               <Copy className="size-3.5" />
               {copied ? 'Copied!' : 'Copy to Clipboard'}
             </Button>
-            <Button variant="outline" size="sm" onClick={resetConfigSettings}>
+            <Button variant="outline" size="sm" onClick={handleReset}>
               <RotateCcw className="size-3.5" />
               Reset
             </Button>
@@ -354,5 +205,67 @@ export const SettingsPanel = () => {
         </div>
       </SheetContent>
     </Sheet>
+  );
+};
+
+interface ProfileSectionProps {
+  profile: Profile;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  perProfile: Partial<Record<Profile, ReturnType<typeof getProfileScope>>>;
+  onValueChange: (
+    param: keyof PossibleSettings,
+    value: PossibleSettings[keyof PossibleSettings]
+  ) => void;
+  onCommit: () => void;
+  onIncludedChange: (param: string, included: boolean) => void;
+}
+
+const ProfileSection = ({
+  profile,
+  open,
+  onOpenChange,
+  perProfile,
+  onValueChange,
+  onCommit,
+  onIncludedChange,
+}: ProfileSectionProps) => {
+  const group = getProfileSettingsGroup(profile);
+  const scope = getProfileScope(perProfile, profile);
+  const params = [
+    ...group.numeric,
+    ...group.boolean,
+    ...group.enum,
+    ...group.list,
+  ].map((option) => option.param);
+  const enabled = params.filter((param) => scope.enabled[param]).length;
+
+  if (params.length === 0) return null;
+
+  return (
+    // The left edge carries the profile's map colour, tying the section to the
+    // routes and polygons it governs.
+    <div
+      className="border-l-2 pl-2"
+      style={{ borderLeftColor: getProfileColor(profile) }}
+      data-testid={`profile-settings-${profile}`}
+    >
+      <CollapsibleSection
+        title={`${getProfileLabel(profile)} settings`}
+        icon={SlidersHorizontal}
+        subtitle={`(${enabled.toString()}/${params.length.toString()})`}
+        open={open}
+        onOpenChange={onOpenChange}
+      >
+        <SettingsGroupFields
+          group={group}
+          values={scope.values}
+          enabled={scope.enabled}
+          onValueChange={onValueChange}
+          onCommit={onCommit}
+          onIncludedChange={onIncludedChange}
+        />
+      </CollapsibleSection>
+    </div>
   );
 };

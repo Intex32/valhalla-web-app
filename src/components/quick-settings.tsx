@@ -1,28 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import {
-  Star,
-  Milestone,
-  DollarSign,
-  Ship,
-  Settings,
-  type LucideIcon,
-} from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { SliderSetting } from '@/components/ui/slider-setting';
 import { SelectSetting } from '@/components/ui/select-setting';
-import {
-  IconEnumButton,
-  type IconEnumOption,
-} from '@/components/ui/icon-enum-setting';
 import { DateTimeButton } from '@/components/ui/date-time-button';
 import { SettingsButton } from '@/components/settings-button';
-import { cn } from '@/lib/utils';
 import { useCommonStore } from '@/stores/common-store';
 import {
   languageOptions,
   settingsInit,
-  HIGHWAY_TOLL_PROFILES,
   DEFAULT_DIRECTIONS_LANGUAGE,
   type DirectionsLanguage,
 } from '@/components/settings-panel/settings-options';
@@ -32,66 +19,7 @@ import {
 } from '@/utils/directions-language';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
-import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
 import type { PossibleSettings } from '@/components/types';
-
-type IconState = 'no' | 'yes' | 'preferred';
-
-const StateIcon = ({ Base, state }: { Base: LucideIcon; state: IconState }) => (
-  <span className="relative inline-block size-5 shrink-0">
-    <Base
-      className={cn('size-5', state === 'no' && 'text-muted-foreground/60')}
-    />
-    {state === 'no' && (
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 flex items-center justify-center"
-      >
-        <span className="block h-[2px] w-[140%] rotate-45 rounded-full bg-destructive" />
-      </span>
-    )}
-    {state === 'preferred' && (
-      <Star
-        aria-hidden
-        className="absolute -top-1 -right-1 size-2.5 fill-amber-400 text-amber-500"
-      />
-    )}
-  </span>
-);
-
-const tristateOptions = (Base: LucideIcon): IconEnumOption[] => [
-  {
-    value: 'no',
-    label: 'No',
-    renderIcon: () => <StateIcon Base={Base} state="no" />,
-  },
-  {
-    value: 'yes',
-    label: 'Yes',
-    renderIcon: () => <StateIcon Base={Base} state="yes" />,
-  },
-  {
-    value: 'preferred',
-    label: 'Preferred',
-    renderIcon: () => <StateIcon Base={Base} state="preferred" />,
-  },
-];
-
-const HIGHWAY_OPTIONS = tristateOptions(Milestone);
-const TOLL_OPTIONS = tristateOptions(DollarSign);
-const FERRY_OPTIONS = tristateOptions(Ship);
-
-const willingnessToOption = (value: number): string => {
-  if (value <= 0) return 'no';
-  if (value >= 1) return 'preferred';
-  return 'yes';
-};
-
-const optionToWillingness = (option: string): number => {
-  if (option === 'no') return 0;
-  if (option === 'preferred') return 1;
-  return 0.5;
-};
 
 interface QuickSettingsProps {
   showTravelTime?: boolean;
@@ -106,9 +34,9 @@ export const QuickSettings = ({
 }: QuickSettingsProps) => {
   const search = useSearch({ from: '/$activeTab' });
   const navigate = useNavigate({ from: '/$activeTab' });
-  const selectedProfiles = useSelectedProfiles();
-  const settings = useCommonStore((state) => state.settings);
-  const updateSettings = useCommonStore((state) => state.updateSettings);
+  const shared = useCommonStore((state) => state.shared);
+  const settings = shared.values;
+  const updateSettings = useCommonStore((state) => state.updateSharedSetting);
   const dateTime = useCommonStore((state) => state.dateTime);
   const updateDateTime = useCommonStore((state) => state.updateDateTime);
   const { refetch: refetchDirections } = useDirectionsQuery();
@@ -126,12 +54,9 @@ export const QuickSettings = ({
     return getDirectionsLanguage();
   });
 
-  // Shown as soon as one selected profile understands the option — the others
-  // simply ignore it in their costing_options.
-  const supportsHighwayToll = selectedProfiles.some((selected) =>
-    (HIGHWAY_TOLL_PROFILES as readonly string[]).includes(selected)
-  );
-
+  // The willingness params are edited in the advanced panel now, but their URL
+  // round-trip stays here: QuickSettings is mounted on every routing tab, so
+  // it's the one component that can own hydration and permalinking for them.
   // Hydrate store from URL on mount (URL wins when present).
   const urlSettingsHydrated = useRef(false);
   useEffect(() => {
@@ -156,23 +81,18 @@ export const QuickSettings = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Mirror store → URL (omit values at default to keep URLs clean).
+  // Mirror store → URL. Willingness params only appear once the user has opted
+  // into sending them, so a permalink carries exactly what Valhalla receives.
   useEffect(() => {
+    const permalinked = (param: 'use_ferry' | 'use_highways' | 'use_tolls') =>
+      shared.enabled[param] ? (settings[param] as number) : undefined;
+
     navigate({
       search: (prev) => ({
         ...prev,
-        use_ferry:
-          settings.use_ferry === settingsInit.use_ferry
-            ? undefined
-            : (settings.use_ferry as number),
-        use_highways:
-          settings.use_highways === settingsInit.use_highways
-            ? undefined
-            : (settings.use_highways as number),
-        use_tolls:
-          settings.use_tolls === settingsInit.use_tolls
-            ? undefined
-            : (settings.use_tolls as number),
+        use_ferry: permalinked('use_ferry'),
+        use_highways: permalinked('use_highways'),
+        use_tolls: permalinked('use_tolls'),
         alternates:
           settings.alternates === settingsInit.alternates
             ? undefined
@@ -181,14 +101,7 @@ export const QuickSettings = ({
       }),
       replace: true,
     });
-  }, [
-    settings.use_ferry,
-    settings.use_highways,
-    settings.use_tolls,
-    settings.alternates,
-    language,
-    navigate,
-  ]);
+  }, [settings, shared.enabled, language, navigate]);
 
   const refetchAll = useCallback(() => {
     refetchDirections();
@@ -234,51 +147,15 @@ export const QuickSettings = ({
         className="bg-muted/60 rounded-md px-3 py-2"
       >
         <div className="space-y-1.25">
-          <div className="flex flex-wrap items-center gap-2 py-1">
-            <IconEnumButton
-              id="use_ferry"
-              label="Use ferries"
-              value={willingnessToOption(settings.use_ferry as number)}
-              options={FERRY_OPTIONS}
-              onValueChange={(value) =>
-                handleSettingChange('use_ferry', optionToWillingness(value))
-              }
-            />
-            {supportsHighwayToll && (
-              <>
-                <IconEnumButton
-                  id="use_highways"
-                  label="Use highways"
-                  value={willingnessToOption(settings.use_highways as number)}
-                  options={HIGHWAY_OPTIONS}
-                  onValueChange={(value) =>
-                    handleSettingChange(
-                      'use_highways',
-                      optionToWillingness(value)
-                    )
-                  }
-                />
-                <IconEnumButton
-                  id="use_tolls"
-                  label="Use tolls"
-                  value={willingnessToOption(settings.use_tolls as number)}
-                  options={TOLL_OPTIONS}
-                  onValueChange={(value) =>
-                    handleSettingChange('use_tolls', optionToWillingness(value))
-                  }
-                />
-              </>
-            )}
-            {showTravelTime && (
-              <div className="ml-auto">
-                <DateTimeButton
-                  type={dateTime.type}
-                  value={dateTime.value}
-                  onChange={handleDateTimeChange}
-                />
-              </div>
-            )}
-          </div>
+          {showTravelTime && (
+            <div className="flex items-center justify-end py-1">
+              <DateTimeButton
+                type={dateTime.type}
+                value={dateTime.value}
+                onChange={handleDateTimeChange}
+              />
+            </div>
+          )}
 
           {showAlternates && (
             <SliderSetting

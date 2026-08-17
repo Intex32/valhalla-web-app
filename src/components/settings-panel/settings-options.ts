@@ -29,12 +29,18 @@ interface ListSetting {
   options: Array<string>;
 }
 
-interface SettingsGroup {
+export interface SettingsGroup {
   numeric: NumericSetting[];
   boolean: BooleanSetting[];
   enum: EnumSetting[];
   list: ListSetting[];
 }
+
+/** Every option in a group, regardless of control type. */
+export const groupParams = (group: SettingsGroup): string[] =>
+  [...group.numeric, ...group.boolean, ...group.enum, ...group.list].map(
+    (setting) => setting.param
+  );
 
 export type SettingsProfile =
   | 'truck'
@@ -144,24 +150,15 @@ const countryCrossingCost = {
   },
 };
 
+// `maneuver_penalty` used to be listed twice — as a general "Turn Penalty"
+// (0-20) and again per profile as "Maneuver Penalty" (0-60). One Valhalla
+// param deserves one control, so this is the single definition, kept in the
+// shared section with the wider of the two ranges.
 const turnPenaltyCost = {
   name: 'Turn Penalty',
   param: 'maneuver_penalty',
   description:
     'A penalty applied when transitioning between roads that do not have consistent naming–in other words, no road names in common. This penalty can be used to create simpler routes that tend to have fewer maneuvers or narrative guidance instructions. The default maneuver penalty is five seconds.',
-  unit: 'sec',
-  settings: {
-    min: 0,
-    max: 20,
-    step: 1,
-  },
-};
-
-const maneuverPenalty = {
-  name: 'Maneuver Penalty',
-  param: 'maneuver_penalty',
-  description:
-    'A penalty applied when transitioning between roads that do not have consistent naming, in order to create simpler routes with fewer maneuvers or guidance instructions. The default maneuver penalty is five seconds.',
   unit: 'sec',
   settings: {
     min: 0,
@@ -860,26 +857,10 @@ export type DirectionsLanguage = (typeof languageOptions)[number]['value'];
 export const DEFAULT_DIRECTIONS_LANGUAGE: DirectionsLanguage = 'en-US';
 export const DIRECTIONS_LANGUAGE_STORAGE_KEY = 'directions_language';
 
-// Settings surfaced in the QuickSettings (left sidebar) panel rather than the
-// advanced (right) panel. Keep this list in sync with what QuickSettings renders
-// — settings-panel.tsx reads it to skip these in the advanced view.
-export const QUICK_SETTING_PARAMS = [
-  'use_highways',
-  'use_tolls',
-  'use_ferry',
-  'alternates',
-] as const;
-
-// Profiles where use_highways / use_tolls are meaningful costing options.
-// Pedestrian, bicycle, motor_scooter ignore them, so the QuickSettings panel
-// only renders those two controls when the active profile is in this list.
-export const HIGHWAY_TOLL_PROFILES = [
-  'car',
-  'truck',
-  'bus',
-  'motorcycle',
-  'emergency',
-] as const satisfies readonly Profile[];
+// Settings the QuickSettings (left sidebar) panel owns. Every costing option
+// lives in the advanced panel now, so this is just the request-level
+// `alternates` — `resetSettings` reads it to leave that preference alone.
+export const QUICK_SETTING_PARAMS = ['alternates'] as const;
 
 export const settingsInit = {
   maneuver_penalty: 5,
@@ -952,7 +933,7 @@ export const settingsInitTruckOverride = {
   height: 4.11,
 };
 
-const gateSettings = [maneuverPenalty, gateCost, gatePenalty] as const;
+const gateSettings = [gateCost, gatePenalty] as const;
 const borderSettings = [countryCrossingCost, countryCrossingPenalty] as const;
 const serviceSettings = [servicePenalty, serviceFactor] as const;
 const tollSettings = [useTollways, tollBoothCost, tollBoothPenalty] as const;
@@ -1121,7 +1102,12 @@ export const generalSettings: Record<SettingsProfile, SettingsGroup> & {
     []
   ),
 
-  motor_scooter: createSettings([useFerry, useTracks, servicePenalty], []),
+  // turnPenaltyCost is listed explicitly here: motor_scooter is the one profile
+  // that used to reach maneuver_penalty only through its private gate settings.
+  motor_scooter: createSettings(
+    [useFerry, useTracks, servicePenalty, turnPenaltyCost],
+    []
+  ),
 
   bicycle: createSettings(
     [useFerry, useLivingStreets, turnPenaltyCost, ...serviceSettings],
@@ -1150,4 +1136,62 @@ export const generalSettings: Record<SettingsProfile, SettingsGroup> & {
     boolean: [useGeocoding],
     numeric: [alternates],
   },
+};
+
+/**
+ * Top-level request params rather than costing options — they are always sent
+ * and so are never gated by an include checkbox.
+ */
+export const REQUEST_LEVEL_PARAMS = ['alternates', 'exclude_polygons'] as const;
+
+/** Client-side only; never reaches Valhalla. */
+export const CLIENT_ONLY_PARAMS = ['use_geocoding'] as const;
+
+const emptyGroup = (): SettingsGroup => ({
+  numeric: [],
+  boolean: [],
+  enum: [],
+  list: [],
+});
+
+type ProfileWithSettings = Exclude<Profile, 'auto'>;
+
+const withSettings = (profiles: Profile[]): ProfileWithSettings[] =>
+  profiles.filter(
+    (profile): profile is ProfileWithSettings => profile !== 'auto'
+  );
+
+/** The options a profile owns privately — its "Profile settings" section. */
+export const getProfileSettingsGroup = (profile: Profile): SettingsGroup =>
+  profile === 'auto' ? emptyGroup() : profileSettings[profile];
+
+/**
+ * The general costing options the selected profiles have in common, merged into
+ * one section. An option a profile owns privately is left out — that profile's
+ * own section already offers it, and a per-profile value wins over the shared
+ * one, so showing both would be a control that silently does nothing.
+ */
+export const getSharedSettingsGroup = (profiles: Profile[]): SettingsGroup => {
+  const selected = withSettings(profiles);
+  const privatelyOwned = new Set(
+    selected.flatMap((profile) => groupParams(profileSettings[profile]))
+  );
+
+  const shared = emptyGroup();
+  const seen = new Set<string>();
+
+  for (const profile of selected) {
+    const general = generalSettings[profile];
+    for (const kind of ['numeric', 'boolean', 'enum', 'list'] as const) {
+      for (const setting of general[kind]) {
+        if (privatelyOwned.has(setting.param) || seen.has(setting.param))
+          continue;
+        seen.add(setting.param);
+        // The cast is safe: `kind` selects matching setting and array types.
+        (shared[kind] as (typeof setting)[]).push(setting);
+      }
+    }
+  }
+
+  return shared;
 };

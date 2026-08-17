@@ -114,8 +114,6 @@ describe('ProfilePicker', () => {
     await user.click(screen.getByTestId('profile-button-bicycle'));
 
     expect(mockOnProfileChange).toHaveBeenCalledWith(['bicycle', 'car']);
-    // Here the primary really does change (car -> bicycle), so settings reset.
-    expect(mockResetSettings).toHaveBeenCalledWith('bicycle');
   });
 
   it('should deselect a profile when more than one is selected', async () => {
@@ -132,17 +130,18 @@ describe('ProfilePicker', () => {
     expect(mockResetSettings).not.toHaveBeenCalled();
   });
 
-  it('should reset settings when dropping the primary profile promotes another', async () => {
+  it('should never reset settings — each profile keeps its own costing options', async () => {
     const user = userEvent.setup();
     selectProfiles('bicycle,car');
     render(
       <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
     );
 
+    // Dropping the primary promotes `car`, which must still not wipe anything.
     await user.click(screen.getByTestId('profile-button-bicycle'));
 
     expect(mockOnProfileChange).toHaveBeenCalledWith(['car']);
-    expect(mockResetSettings).toHaveBeenCalledWith('car');
+    expect(mockResetSettings).not.toHaveBeenCalled();
   });
 
   it('should not deselect the last remaining profile', async () => {

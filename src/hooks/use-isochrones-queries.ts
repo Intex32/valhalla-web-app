@@ -17,7 +17,7 @@ import {
   forward_geocode,
   parseGeocodeResponse,
 } from '@/utils/nominatim';
-import { filterProfileSettings } from '@/utils/filter-profile-settings';
+import { buildCostingOptions } from '@/utils/build-costing-options';
 import { calcArea } from '@/utils/geom';
 import { useCommonStore, type Profile } from '@/stores/common-store';
 import {
@@ -33,8 +33,8 @@ async function fetchIsochronesForProfile(
 ): Promise<ValhallaIsochroneResponse> {
   const { maxRange, interval, denoise, generalize } =
     useIsochronesStore.getState();
-  const { settings: rawSettings } = useCommonStore.getState();
-  const settings = filterProfileSettings(profile, rawSettings);
+  const { shared, perProfile } = useCommonStore.getState();
+  const settings = buildCostingOptions(profile, { shared, perProfile });
 
   const valhallaRequest = buildIsochronesRequest({
     profile,
