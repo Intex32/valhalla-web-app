@@ -43,7 +43,8 @@ export type SettingsProfile =
   | 'pedestrian'
   | 'motor_scooter'
   | 'bicycle'
-  | 'motorcycle';
+  | 'motorcycle'
+  | 'emergency';
 
 const createSettings = (
   numeric: NumericSetting[],
@@ -877,6 +878,7 @@ export const HIGHWAY_TOLL_PROFILES = [
   'truck',
   'bus',
   'motorcycle',
+  'emergency',
 ] as const satisfies readonly Profile[];
 
 export const settingsInit = {
@@ -1074,6 +1076,15 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
     [],
     [speedTypes]
   ),
+
+  // Custom, `auto`-derived costing model served by our Valhalla backend. It
+  // accepts the same costing options as `auto`, so it mirrors the car profile.
+  emergency: createSettings(
+    [...commonVehicleProfileNumeric],
+    [...commonVehicleProfileBoolean],
+    [],
+    [speedTypes]
+  ),
 };
 
 export const generalSettings: Record<SettingsProfile, SettingsGroup> & {
@@ -1128,6 +1139,11 @@ export const generalSettings: Record<SettingsProfile, SettingsGroup> & {
       useTracks,
     ],
     [...ignoreFlags, excludeCashOnlyTolls]
+  ),
+
+  emergency: createSettings(
+    [...commonGeneralNumeric],
+    [...commonGeneralBoolean]
   ),
 
   all: {

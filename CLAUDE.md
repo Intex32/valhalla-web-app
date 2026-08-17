@@ -69,6 +69,12 @@ Three Zustand stores, each with `immer` + `devtools`:
 - `src/stores/directions-store.ts` — waypoints (with geocode results), route results, highlighted maneuver, optimized-route flag, active-route index.
 - `src/stores/isochrones-store.ts` — input/result, range/interval/denoise/generalize, color palette, opacity.
 
+### Costing profiles
+
+Adding a profile touches five places, all of which must agree or TypeScript will complain: `profileEnum` (`src/stores/common-store.ts`), `VALID_PROFILES` (`src/components/utils.ts`), the `iconMap` + `profiles` list in `src/components/profile-picker.tsx`, and the `SettingsProfile` union plus its `profileSettings` / `generalSettings` entries in `src/components/settings-panel/settings-options.ts`. `car` is the one profile renamed on the wire — `src/utils/valhalla.ts` maps it to Valhalla's `auto`; every other profile name is sent as-is.
+
+`emergency` is a **fork-specific** costing model — it only exists on our own Valhalla deployment, not upstream. It is `auto`-derived, so it exposes the same option set as `car`.
+
 Server-state lives in TanStack Query. The global `QueryClient` (`src/lib/tanstack-query/root-provider.tsx`) sets `refetchOnWindowFocus: false`, `retry: 1`, `staleTime: 5min`, `gcTime: 10min`. Query hooks are in `src/hooks/use-*-queries.ts`. They read inputs directly from Zustand stores via `useStore.getState()` and from the router via `router.state.location.search` rather than parameters — keep that pattern when adding new queries.
 
 ### Components
@@ -96,14 +102,14 @@ Server-state lives in TanStack Query. The global `QueryClient` (`src/lib/tanstac
 
 All build-time, prefixed `VITE_`. Defined in `.env`, typed in `src/vite-env.d.ts`:
 
-| Var                          | Purpose                                                                          |
-| ---------------------------- | -------------------------------------------------------------------------------- |
-| `VITE_VALHALLA_URL`          | Valhalla server base URL (overridable via UI/localStorage)                       |
-| `VITE_NOMINATIM_URL`         | Nominatim server for geocoding                                                   |
-| `VITE_TILE_SERVER_URL`       | Raster tile URL template `{z}/{x}/{y}.png`                                       |
-| `VITE_CENTER_COORDS`         | Initial map center `"lat,lng"`                                                   |
-| `VITE_DEFAULT_COSTING_MODEL` | Default profile (auto/bicycle/pedestrian/car/truck/bus/motor_scooter/motorcycle) |
-| `VITE_CLIENT_ID`             | Sent as `X-Client-Id` on Valhalla requests                                       |
+| Var                          | Purpose                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| `VITE_VALHALLA_URL`          | Valhalla server base URL (overridable via UI/localStorage)                                 |
+| `VITE_NOMINATIM_URL`         | Nominatim server for geocoding                                                             |
+| `VITE_TILE_SERVER_URL`       | Raster tile URL template `{z}/{x}/{y}.png`                                                 |
+| `VITE_CENTER_COORDS`         | Initial map center `"lat,lng"`                                                             |
+| `VITE_DEFAULT_COSTING_MODEL` | Default profile (auto/bicycle/pedestrian/car/truck/bus/motor_scooter/motorcycle/emergency) |
+| `VITE_CLIENT_ID`             | Sent as `X-Client-Id` on Valhalla requests                                                 |
 
 ## Deployment
 

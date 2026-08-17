@@ -5,6 +5,7 @@ import { ReactComponent as TruckSvg } from '@/images/truck.svg';
 import { ReactComponent as BikeSvg } from '@/images/bike.svg';
 import { ReactComponent as PedestrianSvg } from '@/images/pedestrian.svg';
 import { ReactComponent as MotorbikeSvg } from '@/images/motorbike.svg';
+import { ReactComponent as AmbulanceSvg } from '@/images/ambulance.svg';
 import type { Profile } from '@/stores/common-store';
 import {
   Tooltip,
@@ -26,6 +27,7 @@ const iconMap = {
   motor_scooter: <ScooterSvg className="size-7" />,
   bus: <BusSvg className="size-7" />,
   motorcycle: <MotorbikeSvg className="size-7" />,
+  emergency: <AmbulanceSvg className="size-7" />,
 };
 
 interface ProfilePickerProps {
@@ -56,6 +58,7 @@ export const ProfilePicker = ({
     { value: 'bus', label: 'Bus' },
     { value: 'motor_scooter', label: 'Motor Scooter' },
     { value: 'motorcycle', label: 'Motorcycle' },
+    { value: 'emergency', label: 'Emergency' },
   ];
 
   return (
@@ -66,7 +69,7 @@ export const ProfilePicker = ({
           variant="outline"
           size="lg"
           value={activeProfile}
-          className="[&_button]:h-12 [&_button]:min-w-12 [&_button]:px-1"
+          className="[&_button]:h-12 [&_button]:min-w-11 [&_button]:px-1"
           onValueChange={(value: Profile) => {
             if (value && value !== activeProfile) {
               handleUpdateProfile(value);

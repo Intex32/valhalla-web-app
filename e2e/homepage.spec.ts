@@ -64,6 +64,7 @@ test('has default elements in the page', async ({ page }) => {
   await expect(page.getByTestId('profile-button-bus')).toBeVisible();
   await expect(page.getByTestId('profile-button-motor_scooter')).toBeVisible();
   await expect(page.getByTestId('profile-button-motorcycle')).toBeVisible();
+  await expect(page.getByTestId('profile-button-emergency')).toBeVisible();
 
   await expect(page.getByTestId('show-hide-settings-btn')).toBeVisible();
 

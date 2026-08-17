@@ -47,6 +47,7 @@ describe('ProfilePicker', () => {
       screen.getByTestId('profile-button-motor_scooter')
     ).toBeInTheDocument();
     expect(screen.getByTestId('profile-button-motorcycle')).toBeInTheDocument();
+    expect(screen.getByTestId('profile-button-emergency')).toBeInTheDocument();
   });
 
   it('should highlight the active profile', () => {
@@ -128,6 +129,9 @@ describe('ProfilePicker', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('radio', { name: 'Select Motorcycle profile' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('radio', { name: 'Select Emergency profile' })
     ).toBeInTheDocument();
   });
 

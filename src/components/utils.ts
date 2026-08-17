@@ -9,6 +9,7 @@ export const VALID_PROFILES: readonly Profile[] = [
   'bus',
   'motor_scooter',
   'motorcycle',
+  'emergency',
 ] as const;
 
 export const isValidProfile = (profile: string): profile is Profile => {
