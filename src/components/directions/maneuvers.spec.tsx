@@ -14,6 +14,7 @@ vi.mock('@/stores/directions-store', () => ({
       zoomToManeuver: mockZoomToManeuver,
     })
   ),
+  routeKey: (profile: string, index: number) => `${profile}:${index}`,
 }));
 
 const createMockManeuver = (overrides: Partial<Maneuver> = {}): Maneuver => ({
@@ -55,7 +56,9 @@ describe('Maneuvers', () => {
 
   it('should render without crashing', () => {
     const legs = [createMockLeg([createMockManeuver()])];
-    expect(() => render(<Maneuvers legs={legs} index={-1} />)).not.toThrow();
+    expect(() =>
+      render(<Maneuvers legs={legs} profile="car" index={0} />)
+    ).not.toThrow();
   });
 
   it('should display maneuver instruction', () => {
@@ -64,7 +67,7 @@ describe('Maneuvers', () => {
         createMockManeuver({ instruction: 'Turn left onto Main Street' }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('Turn left onto Main Street')).toBeInTheDocument();
   });
@@ -77,7 +80,7 @@ describe('Maneuvers', () => {
         createMockManeuver({ instruction: 'Arrive at destination' }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('Start on First Avenue')).toBeInTheDocument();
     expect(
@@ -90,7 +93,7 @@ describe('Maneuvers', () => {
     const legs = [
       createMockLeg([createMockManeuver({ length: 0.15, type: 1 })]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('150m')).toBeInTheDocument();
   });
@@ -99,7 +102,7 @@ describe('Maneuvers', () => {
     const legs = [
       createMockLeg([createMockManeuver({ length: 2.5, type: 1 })]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('2.50km')).toBeInTheDocument();
   });
@@ -114,7 +117,7 @@ describe('Maneuvers', () => {
         }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('Arrive at destination')).toBeInTheDocument();
     expect(screen.queryByText('Length')).not.toBeInTheDocument();
@@ -123,14 +126,14 @@ describe('Maneuvers', () => {
 
   it('should display toll indicator when maneuver has toll', () => {
     const legs = [createMockLeg([createMockManeuver({ toll: true })])];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('Toll')).toBeInTheDocument();
   });
 
   it('should display ferry indicator when maneuver has ferry', () => {
     const legs = [createMockLeg([createMockManeuver({ ferry: true })])];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('Ferry')).toBeInTheDocument();
   });
@@ -145,7 +148,7 @@ describe('Maneuvers', () => {
         }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     const maneuverElement = screen.getByText('Turn left onto Main Street')
       .parentElement?.parentElement;
@@ -154,7 +157,8 @@ describe('Maneuvers', () => {
     expect(mockHighlightManeuver).toHaveBeenCalledWith({
       startIndex: 5,
       endIndex: 15,
-      alternate: -1,
+      profile: 'car',
+      index: 0,
     });
   });
 
@@ -168,7 +172,7 @@ describe('Maneuvers', () => {
         }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     const maneuverElement = screen.getByText('Turn left onto Main Street')
       .parentElement?.parentElement;
@@ -189,7 +193,7 @@ describe('Maneuvers', () => {
         }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={-1} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     const maneuverElement = screen.getByText('Turn left onto Main Street')
       .parentElement?.parentElement;
@@ -218,7 +222,7 @@ describe('Maneuvers', () => {
         }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={0} />);
+    render(<Maneuvers legs={legs} profile="car" index={0} />);
 
     expect(screen.getByText('First leg maneuver')).toBeInTheDocument();
     expect(screen.getByText('Second leg maneuver')).toBeInTheDocument();
@@ -234,7 +238,7 @@ describe('Maneuvers', () => {
         }),
       ]),
     ];
-    render(<Maneuvers legs={legs} index={2} />);
+    render(<Maneuvers legs={legs} profile="car" index={2} />);
 
     const maneuverElement = screen.getByText('Turn left onto Main Street')
       .parentElement?.parentElement;
@@ -243,7 +247,32 @@ describe('Maneuvers', () => {
     expect(mockHighlightManeuver).toHaveBeenCalledWith({
       startIndex: 0,
       endIndex: 10,
-      alternate: 2,
+      profile: 'car',
+      index: 2,
+    });
+  });
+
+  it('should pass the owning profile to highlightManeuver', async () => {
+    const user = userEvent.setup();
+    const legs = [
+      createMockLeg([
+        createMockManeuver({
+          begin_shape_index: 3,
+          end_shape_index: 7,
+        }),
+      ]),
+    ];
+    render(<Maneuvers legs={legs} profile="emergency" index={0} />);
+
+    const maneuverElement = screen.getByText('Turn left onto Main Street')
+      .parentElement?.parentElement;
+    await user.hover(maneuverElement!);
+
+    expect(mockHighlightManeuver).toHaveBeenCalledWith({
+      startIndex: 3,
+      endIndex: 7,
+      profile: 'emergency',
+      index: 0,
     });
   });
 });

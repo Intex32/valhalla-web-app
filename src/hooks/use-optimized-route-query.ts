@@ -9,6 +9,8 @@ import {
   VALHALLA_CLIENT_HEADERS,
 } from '@/utils/valhalla';
 import { filterProfileSettings } from '@/utils/filter-profile-settings';
+import { getPrimaryProfile, parseProfilesWithFallback } from '@/utils/profiles';
+import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useCommonStore } from '@/stores/common-store';
 import { router } from '@/routes';
 import type { ValhallaOptimizedRouteResponse } from '@/components/types';
@@ -23,6 +25,7 @@ export function useOptimizedRouteQuery() {
   );
   const setIsOptimized = useDirectionsStore((state) => state.setIsOptimized);
   const zoomTo = useCommonStore((state) => state.zoomTo);
+  const { refetch: refetchDirections } = useDirectionsQuery();
   const { settings: rawSettings } = useCommonStore.getState();
 
   const mutation = useMutation({
@@ -41,7 +44,12 @@ export function useOptimizedRouteQuery() {
         throw new Error('Not enough waypoints to optimize');
       }
 
-      const profile = router.state.location.search.profile || 'bicycle';
+      // Waypoint ordering is a single-route operation — it runs against the
+      // primary profile even when several are selected for comparison.
+      const profiles = parseProfilesWithFallback(
+        router.state.location.search.profile
+      );
+      const profile = getPrimaryProfile(profiles);
       const settings = filterProfileSettings(profile, rawSettings);
       const language = getDirectionsLanguage();
       const request = buildOptimizedRouteRequest({
@@ -76,9 +84,14 @@ export function useOptimizedRouteQuery() {
 
       showValhallaWarnings(data.trip.warnings);
 
-      return { data: processedData, relevantWaypoints };
+      return {
+        data: processedData,
+        relevantWaypoints,
+        profile,
+        profileCount: profiles.length,
+      };
     },
-    onSuccess: ({ data, relevantWaypoints }) => {
+    onSuccess: ({ data, relevantWaypoints, profile, profileCount }) => {
       const newWaypoints: Waypoint[] = [];
       const locations = data.trip.locations;
       locations.forEach((loc) => {
@@ -91,9 +104,16 @@ export function useOptimizedRouteQuery() {
       });
       setWaypoint(newWaypoints);
       setIsOptimized(true);
-      receiveRouteResults({ data });
+      receiveRouteResults({ results: [{ profile, data }] });
       zoomTo(data.decodedGeometry);
       toast.success('Route optimized successfully');
+
+      // /optimized_route only answers for the primary profile. The others are
+      // now stale against the reordered waypoints, so re-route them rather
+      // than leaving the comparison silently reduced to one profile.
+      if (profileCount > 1) {
+        refetchDirections();
+      }
     },
     onError: (error) => {
       console.error('Optimization error:', error);

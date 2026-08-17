@@ -4,6 +4,7 @@ import { SettingsFooter } from '@/components/settings-footer';
 import { QuickSettings } from '@/components/quick-settings';
 import { useIsochronesStore } from '@/stores/isochrones-store';
 import { IsochroneCard } from './isochrone-card';
+import { IsochroneVisualization } from './isochrone-visualization';
 import { parseUrlParams } from '@/utils/parse-url-params';
 import { isValidCoordinates } from '@/utils/geom';
 import { useNavigate } from '@tanstack/react-router';
@@ -80,10 +81,21 @@ export const IsochronesControl = () => {
       <Waypoints />
       <QuickSettings showAlternates={false} showLanguage={false} />
       <SettingsFooter />
-      {results.data && (
-        <div>
-          <h3 className="font-bold mb-2">Isochrones</h3>
-          <IsochroneCard data={results.data} showOnMap={results.show} />
+      {results.byProfile.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="font-bold">Isochrones</h3>
+          <IsochroneVisualization
+            multipleProfiles={results.byProfile.length > 1}
+          />
+          {results.byProfile.map(({ profile, data }) => (
+            <IsochroneCard
+              key={profile}
+              data={data}
+              profile={profile}
+              showOnMap={results.show[profile] ?? true}
+              showProfileLabel={results.byProfile.length > 1}
+            />
+          ))}
         </div>
       )}
     </>

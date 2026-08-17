@@ -17,7 +17,9 @@ import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 import { useCallback } from 'react';
 import { useCommonStore } from '@/stores/common-store';
 import { Loader2 } from 'lucide-react';
-import { useSearch } from '@tanstack/react-router';
+import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
+import { getProfileColor } from '@/utils/profile-colors';
+import { getProfileLabel } from '@/utils/profiles';
 
 const iconMap = {
   truck: <TruckSvg className="size-7" />,
@@ -30,9 +32,20 @@ const iconMap = {
   emergency: <AmbulanceSvg className="size-7" />,
 };
 
+const profiles: Profile[] = [
+  'bicycle',
+  'pedestrian',
+  'car',
+  'truck',
+  'bus',
+  'motor_scooter',
+  'motorcycle',
+  'emergency',
+];
+
 interface ProfilePickerProps {
   loading: boolean;
-  onProfileChange: (value: Profile) => void;
+  onProfileChange: (value: Profile[]) => void;
 }
 
 export const ProfilePicker = ({
@@ -40,63 +53,80 @@ export const ProfilePicker = ({
   onProfileChange,
 }: ProfilePickerProps) => {
   const resetSettings = useCommonStore((state) => state.resetSettings);
-  const { profile: activeProfile } = useSearch({ from: '/$activeTab' });
+  const selectedProfiles = useSelectedProfiles();
 
-  const handleUpdateProfile = useCallback(
-    (value: Profile) => {
-      resetSettings(value);
-      onProfileChange(value);
+  const handleUpdateProfiles = useCallback(
+    (next: Profile[]) => {
+      // At least one profile has to stay selected — deselecting the last one
+      // would leave nothing to route with.
+      if (next.length === 0) return;
+
+      // `settings` holds the primary profile's option set, so it is only reset
+      // when the primary actually changes. Adding or dropping a profile to
+      // compare against must not discard the tuning the user already did.
+      if (next[0] !== selectedProfiles[0]) {
+        resetSettings(next[0]!);
+      }
+      onProfileChange(next);
     },
-    [resetSettings, onProfileChange]
+    [resetSettings, onProfileChange, selectedProfiles]
   );
-
-  const profiles = [
-    { value: 'bicycle', label: 'Bicycle' },
-    { value: 'pedestrian', label: 'Pedestrian' },
-    { value: 'car', label: 'Car' },
-    { value: 'truck', label: 'Truck' },
-    { value: 'bus', label: 'Bus' },
-    { value: 'motor_scooter', label: 'Motor Scooter' },
-    { value: 'motorcycle', label: 'Motorcycle' },
-    { value: 'emergency', label: 'Emergency' },
-  ];
 
   return (
     <div className="flex flex-col gap-2">
       <TooltipProvider>
         <ToggleGroup
-          type="single"
+          type="multiple"
           variant="outline"
           size="lg"
-          value={activeProfile}
+          value={selectedProfiles}
           className="[&_button]:h-12 [&_button]:min-w-11 [&_button]:px-1"
-          onValueChange={(value: Profile) => {
-            if (value && value !== activeProfile) {
-              handleUpdateProfile(value);
-            }
+          onValueChange={(value: string[]) => {
+            // Radix hands back the raw set; re-order it so the list keeps the
+            // picker's left-to-right order and stays stable in the URL.
+            handleUpdateProfiles(profiles.filter((p) => value.includes(p)));
           }}
         >
-          {profiles.map((profile, i) => (
-            <Tooltip key={i}>
-              <TooltipTrigger asChild>
-                <ToggleGroupItem
-                  value={profile.value}
-                  aria-label={`Select ${profile.label} profile`}
-                  data-testid={`profile-button-` + profile.value}
-                  data-state={profile.value === activeProfile ? 'on' : 'off'}
-                >
-                  {profile.value === activeProfile && loading ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    iconMap[profile.value as keyof typeof iconMap]
-                  )}
-                </ToggleGroupItem>
-              </TooltipTrigger>
-              <TooltipContent>{profile.label}</TooltipContent>
-            </Tooltip>
-          ))}
+          {profiles.map((profile) => {
+            const isSelected = selectedProfiles.includes(profile);
+            const label = getProfileLabel(profile);
+
+            return (
+              <Tooltip key={profile}>
+                <TooltipTrigger asChild>
+                  <ToggleGroupItem
+                    value={profile}
+                    aria-label={`Select ${label} profile`}
+                    data-testid={`profile-button-${profile}`}
+                    data-state={isSelected ? 'on' : 'off'}
+                    className="relative flex-col"
+                  >
+                    {isSelected && loading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      iconMap[profile as keyof typeof iconMap]
+                    )}
+                    {/* Colour key tying this profile to its lines/polygons. */}
+                    {isSelected && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-x-1 bottom-0.5 h-1 rounded-full"
+                        style={{ backgroundColor: getProfileColor(profile) }}
+                      />
+                    )}
+                  </ToggleGroupItem>
+                </TooltipTrigger>
+                <TooltipContent>{label}</TooltipContent>
+              </Tooltip>
+            );
+          })}
         </ToggleGroup>
       </TooltipProvider>
+      <p className="text-muted-foreground text-xs">
+        {selectedProfiles.length > 1
+          ? `Comparing ${selectedProfiles.length.toString()} profiles — each is routed between the same waypoints.`
+          : 'Select more than one profile to compare them side by side.'}
+      </p>
     </div>
   );
 };

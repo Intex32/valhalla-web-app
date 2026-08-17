@@ -2,6 +2,7 @@ import type {
   ActiveWaypoint,
   ParsedDirectionsGeometry,
 } from '@/components/types';
+import type { Profile } from '@/stores/common-store';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
@@ -12,10 +13,18 @@ export interface Waypoint {
   userInput: string;
 }
 
-interface HighlightSegment {
+/**
+ * A single route within a profile's response: 0 is the main route, 1..n are
+ * that response's alternates.
+ */
+export interface RouteRef {
+  profile: Profile;
+  index: number;
+}
+
+interface HighlightSegment extends RouteRef {
   startIndex: number;
   endIndex: number;
-  alternate: number;
 }
 
 interface ZoomObj {
@@ -23,10 +32,34 @@ interface ZoomObj {
   timeNow: number;
 }
 
-interface RouteResult {
-  data: ParsedDirectionsGeometry | null;
+/** One Valhalla `/route` response, tagged with the profile that produced it. */
+export interface ProfileRouteResult {
+  profile: Profile;
+  data: ParsedDirectionsGeometry;
+}
+
+interface RouteResults {
+  /** One entry per selected profile that returned a route, in selection order. */
+  byProfile: ProfileRouteResult[];
+  /** Per-route map visibility, keyed by {@link routeKey}. */
   show: Record<string, boolean>;
 }
+
+export const routeKey = (profile: Profile, index: number): string =>
+  `${profile}:${index}`;
+
+/** The n-th route of a profile's response — index 0 is the main route. */
+export const getRouteAt = (
+  results: ProfileRouteResult[],
+  { profile, index }: RouteRef
+): ParsedDirectionsGeometry | null => {
+  const entry = results.find((result) => result.profile === profile);
+  if (!entry) return null;
+  if (index === 0) return entry.data;
+  return (
+    (entry.data.alternates?.[index - 1] as ParsedDirectionsGeometry) ?? null
+  );
+};
 
 interface InclineDeclineTotal {
   [key: string]: unknown;
@@ -65,17 +98,18 @@ export interface DirectionsState {
   waypoints: Waypoint[];
   zoomObj: ZoomObj;
   selectedAddresses: string | (Waypoint | null)[];
-  results: RouteResult;
+  results: RouteResults;
   inclineDeclineTotal?: InclineDeclineTotal;
   isOptimized: boolean;
-  activeRouteIndex: number;
+  /** The route the panel and map highlight; null while there are no results. */
+  activeRoute: RouteRef | null;
 }
 
 interface DirectionsActions {
   updateInclineDecline: (inclineDeclineTotal: InclineDeclineTotal) => void;
-  toggleShowOnMap: (params: { show: boolean; idx: number }) => void;
+  toggleShowOnMap: (params: RouteRef & { show: boolean }) => void;
   clearRoutes: () => void;
-  receiveRouteResults: (params: { data: ParsedDirectionsGeometry }) => void;
+  receiveRouteResults: (params: { results: ProfileRouteResult[] }) => void;
   receiveGeocodeResults: (params: {
     index: number;
     addresses: ActiveWaypoint[];
@@ -99,7 +133,7 @@ interface DirectionsActions {
     lat: number
   ) => void;
   setIsOptimized: (isOptimized: boolean) => void;
-  setActiveRouteIndex: (index: number) => void;
+  setActiveRoute: (route: RouteRef) => void;
 }
 
 type DirectionsStore = DirectionsState & DirectionsActions;
@@ -108,13 +142,18 @@ export const useDirectionsStore = create<DirectionsStore>()(
   devtools(
     immer((set) => ({
       successful: false,
-      highlightSegment: { startIndex: -1, endIndex: -1, alternate: -1 },
+      highlightSegment: {
+        startIndex: -1,
+        endIndex: -1,
+        index: -1,
+        profile: 'bicycle',
+      },
       waypoints: defaultWaypoints,
       zoomObj: { index: -1, timeNow: -1 },
       selectedAddresses: '',
-      results: { data: null, show: { '0': true } },
+      results: { byProfile: [], show: {} },
       isOptimized: false,
-      activeRouteIndex: 0,
+      activeRoute: null,
 
       updateInclineDecline: (inclineDeclineTotal) =>
         set(
@@ -125,10 +164,10 @@ export const useDirectionsStore = create<DirectionsStore>()(
           'updateInclineDecline'
         ),
 
-      toggleShowOnMap: ({ idx, show }) =>
+      toggleShowOnMap: ({ profile, index, show }) =>
         set(
           (state) => {
-            state.results.show[idx] = show;
+            state.results.show[routeKey(profile, index)] = show;
           },
           undefined,
           'toggleShowOnMap'
@@ -139,23 +178,32 @@ export const useDirectionsStore = create<DirectionsStore>()(
           (state) => {
             state.successful = false;
             state.inclineDeclineTotal = undefined;
-            state.results.data = null;
-            state.activeRouteIndex = 0;
+            state.results = { byProfile: [], show: {} };
+            state.activeRoute = null;
           },
           undefined,
           'clearRoutes'
         ),
 
-      receiveRouteResults: ({ data }) =>
+      receiveRouteResults: ({ results }) =>
         set(
           (state) => {
-            const show: Record<string, boolean> = { '0': true };
-            data.alternates?.forEach((_, i) => (show[i + 1] = true));
+            const show: Record<string, boolean> = {};
+            for (const { profile, data } of results) {
+              show[routeKey(profile, 0)] = true;
+              data.alternates?.forEach((_, i) => {
+                show[routeKey(profile, i + 1)] = true;
+              });
+            }
 
-            state.successful = true;
+            const first = results[0];
+
+            state.successful = results.length > 0;
             state.inclineDeclineTotal = undefined;
-            state.results = { data, show };
-            state.activeRouteIndex = 0;
+            state.results = { byProfile: results, show };
+            state.activeRoute = first
+              ? { profile: first.profile, index: 0 }
+              : null;
           },
           undefined,
           'receiveRouteResults'
@@ -282,7 +330,8 @@ export const useDirectionsStore = create<DirectionsStore>()(
             if (!hasActiveRoute(state.waypoints)) {
               state.successful = false;
               state.inclineDeclineTotal = undefined;
-              state.results.data = null;
+              state.results = { byProfile: [], show: {} };
+              state.activeRoute = null;
             }
           },
           undefined,
@@ -297,7 +346,7 @@ export const useDirectionsStore = create<DirectionsStore>()(
               startIndex === fromTo.startIndex && endIndex === fromTo.endIndex;
 
             state.highlightSegment = isToggleOff
-              ? { startIndex: -1, endIndex: -1, alternate: fromTo.alternate }
+              ? { ...fromTo, startIndex: -1, endIndex: -1 }
               : fromTo;
           },
           undefined,
@@ -345,13 +394,13 @@ export const useDirectionsStore = create<DirectionsStore>()(
           'setIsOptimized'
         ),
 
-      setActiveRouteIndex: (index) =>
+      setActiveRoute: (route) =>
         set(
           (state) => {
-            state.activeRouteIndex = index;
+            state.activeRoute = route;
           },
           undefined,
-          'setActiveRouteIndex'
+          'setActiveRoute'
         ),
     })),
     { name: 'directions-store' }

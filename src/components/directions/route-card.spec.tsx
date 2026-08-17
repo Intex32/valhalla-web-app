@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouteCard } from './route-card';
 import type { ParsedDirectionsGeometry } from '@/components/types';
+import { getRouteColor } from '@/utils/profile-colors';
 
 const mockExportDataAsJson = vi.fn();
 const mockDownloadFile = vi.fn();
@@ -23,18 +24,33 @@ vi.mock('@/utils/date-time', () => ({
 vi.mock('./summary', () => ({
   Summary: ({
     title,
+    profile,
     index,
   }: {
     summary: unknown;
     title: string;
+    profile: string;
     index: number;
     routeCoordinates: number[][];
-  }) => <div data-testid={`mock-summary-${index}`}>Summary: {title}</div>,
+  }) => (
+    <div data-testid={`mock-summary-${index}`} data-profile={profile}>
+      Summary: {title}
+    </div>
+  ),
 }));
 
 vi.mock('./maneuvers', () => ({
-  Maneuvers: ({ index }: { legs: unknown[]; index: number }) => (
-    <div data-testid={`mock-maneuvers-${index}`}>Maneuvers</div>
+  Maneuvers: ({
+    profile,
+    index,
+  }: {
+    legs: unknown[];
+    profile: string;
+    index: number;
+  }) => (
+    <div data-testid={`mock-maneuvers-${index}`} data-profile={profile}>
+      Maneuvers
+    </div>
   ),
 }));
 
@@ -98,7 +114,13 @@ describe('RouteCard', () => {
     const data = createMockData();
     expect(() =>
       render(
-        <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+        <RouteCard
+          data={data}
+          profile="car"
+          index={0}
+          isActive={true}
+          onSelect={vi.fn()}
+        />
       )
     ).not.toThrow();
   });
@@ -109,7 +131,13 @@ describe('RouteCard', () => {
       trip: undefined,
     } as unknown as ParsedDirectionsGeometry;
     const { container } = render(
-      <RouteCard data={data} index={0} isActive={false} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={false}
+        onSelect={vi.fn()}
+      />
     );
 
     expect(container.firstChild).toBeNull();
@@ -118,7 +146,13 @@ describe('RouteCard', () => {
   it('should render Summary component with Main Route title', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     expect(screen.getByTestId('mock-summary-0')).toBeInTheDocument();
@@ -128,7 +162,13 @@ describe('RouteCard', () => {
   it('should render Summary component with Alternate Route title', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={1} isActive={false} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={1}
+        isActive={false}
+        onSelect={vi.fn()}
+      />
     );
 
     expect(screen.getByText('Summary: Alternate Route #1')).toBeInTheDocument();
@@ -137,7 +177,13 @@ describe('RouteCard', () => {
   it('should render Show Maneuvers button', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     expect(
@@ -149,7 +195,13 @@ describe('RouteCard', () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: /show maneuvers/i }));
@@ -164,7 +216,13 @@ describe('RouteCard', () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: /show maneuvers/i }));
@@ -179,7 +237,13 @@ describe('RouteCard', () => {
   it('should render Export button', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     expect(screen.getByRole('button', { name: /export/i })).toBeInTheDocument();
@@ -189,7 +253,13 @@ describe('RouteCard', () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: /export/i }));
@@ -204,7 +274,13 @@ describe('RouteCard', () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: /export/i }));
@@ -220,7 +296,13 @@ describe('RouteCard', () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: /export/i }));
@@ -239,7 +321,13 @@ describe('RouteCard', () => {
       decodedGeometry: [[52.5, 13.4]],
     });
     render(
-      <RouteCard data={data} index={0} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: /export/i }));
@@ -257,7 +345,13 @@ describe('RouteCard', () => {
   it('should apply hover styles to card', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={false} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={false}
+        onSelect={vi.fn()}
+      />
     );
 
     const card = screen.getByTestId('mock-summary-0').parentElement;
@@ -268,7 +362,13 @@ describe('RouteCard', () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
-      <RouteCard data={data} index={0} isActive={false} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={false}
+        onSelect={vi.fn()}
+      />
     );
 
     const card = screen.getByTestId('mock-summary-0').parentElement;
@@ -282,22 +382,110 @@ describe('RouteCard', () => {
   it('should apply active styling when isActive is true', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={-1} isActive={true} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
     );
 
-    const card = screen.getByTestId('mock-summary--1').parentElement;
+    const card = screen.getByTestId('mock-summary-0').parentElement;
     expect(card).toHaveClass('border-l-4');
-    expect(card).toHaveClass('border-l-primary');
+    expect(card).toHaveStyle({ borderLeftColor: getRouteColor('car', 0) });
+  });
+
+  it('should tint the active border with the profile colour', () => {
+    const data = createMockData();
+    const { unmount } = render(
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId('mock-summary-0').parentElement).toHaveStyle({
+      borderLeftColor: getRouteColor('car', 0),
+    });
+    unmount();
+
+    render(
+      <RouteCard
+        data={data}
+        profile="emergency"
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId('mock-summary-0').parentElement).toHaveStyle({
+      borderLeftColor: getRouteColor('emergency', 0),
+    });
+    expect(getRouteColor('emergency', 0)).not.toBe(getRouteColor('car', 0));
+  });
+
+  it('should fade the active border for alternates of the same profile', () => {
+    const data = createMockData();
+    render(
+      <RouteCard
+        data={data}
+        profile="car"
+        index={1}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('mock-summary-1').parentElement).toHaveStyle({
+      borderLeftColor: getRouteColor('car', 1),
+    });
+    expect(getRouteColor('car', 1)).not.toBe(getRouteColor('car', 0));
   });
 
   it('should not apply active styling when isActive is false', () => {
     const data = createMockData();
     render(
-      <RouteCard data={data} index={-1} isActive={false} onSelect={vi.fn()} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={false}
+        onSelect={vi.fn()}
+      />
     );
 
-    const card = screen.getByTestId('mock-summary--1').parentElement;
+    const card = screen.getByTestId('mock-summary-0').parentElement;
     expect(card).not.toHaveClass('border-l-4');
+    expect(card?.style.borderLeftColor).toBe('');
+  });
+
+  it('should forward the profile to Summary and Maneuvers', async () => {
+    const user = userEvent.setup();
+    const data = createMockData();
+    render(
+      <RouteCard
+        data={data}
+        profile="truck"
+        index={0}
+        isActive={false}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('mock-summary-0')).toHaveAttribute(
+      'data-profile',
+      'truck'
+    );
+
+    await user.click(screen.getByRole('button', { name: /show maneuvers/i }));
+
+    expect(screen.getByTestId('mock-maneuvers-0')).toHaveAttribute(
+      'data-profile',
+      'truck'
+    );
   });
 
   it('should call onSelect when card is clicked', async () => {
@@ -305,10 +493,16 @@ describe('RouteCard', () => {
     const data = createMockData();
     const onSelect = vi.fn();
     render(
-      <RouteCard data={data} index={-1} isActive={false} onSelect={onSelect} />
+      <RouteCard
+        data={data}
+        profile="car"
+        index={0}
+        isActive={false}
+        onSelect={onSelect}
+      />
     );
 
-    const card = screen.getByTestId('mock-summary--1').parentElement!;
+    const card = screen.getByTestId('mock-summary-0').parentElement!;
     await user.click(card);
 
     expect(onSelect).toHaveBeenCalled();

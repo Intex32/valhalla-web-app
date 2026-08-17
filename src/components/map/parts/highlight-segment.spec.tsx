@@ -18,30 +18,73 @@ vi.mock('react-map-gl/maplibre', () => ({
 
 const mockUseDirectionsStore = vi.fn();
 
-vi.mock('@/stores/directions-store', () => ({
-  useDirectionsStore: (selector: (state: unknown) => unknown) =>
-    mockUseDirectionsStore(selector),
-}));
+// The component resolves coordinates through `getRouteAt`, so the real module
+// exports have to survive the mock — only the hook is replaced.
+vi.mock('@/stores/directions-store', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/stores/directions-store')
+  >('@/stores/directions-store');
+
+  return {
+    ...actual,
+    useDirectionsStore: (selector: (state: unknown) => unknown) =>
+      mockUseDirectionsStore(selector),
+  };
+});
+
+const carRoute = {
+  decodedGeometry: [
+    [50, 10],
+    [51, 11],
+    [52, 12],
+    [53, 13],
+  ],
+  alternates: [
+    {
+      decodedGeometry: [
+        [60, 20],
+        [61, 21],
+        [62, 22],
+        [63, 23],
+      ],
+    },
+  ],
+};
+
+const emergencyRoute = {
+  decodedGeometry: [
+    [70, 30],
+    [71, 31],
+    [72, 32],
+    [73, 33],
+  ],
+  alternates: [],
+};
 
 const createMockState = (overrides = {}) => ({
   results: {
-    data: {
-      decodedGeometry: [
-        [50, 10],
-        [51, 11],
-        [52, 12],
-        [53, 13],
-      ],
-      alternates: [],
-    },
+    byProfile: [
+      { profile: 'car', data: carRoute },
+      { profile: 'emergency', data: emergencyRoute },
+    ],
+    show: {},
   },
   highlightSegment: {
     startIndex: 1,
     endIndex: 2,
-    alternate: 0,
+    profile: 'car',
+    index: 0,
   },
   ...overrides,
 });
+
+const renderWithState = (state: unknown) => {
+  mockUseDirectionsStore.mockImplementation((selector) => selector(state));
+  return render(<HighlightSegment />);
+};
+
+const renderedCoordinates = () =>
+  mockSource.mock.calls[0]?.[0]?.data.geometry.coordinates as number[][];
 
 describe('HighlightSegment', () => {
   beforeEach(() => {
@@ -51,37 +94,39 @@ describe('HighlightSegment', () => {
   });
 
   it('should render nothing when highlightSegment is null', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = { results: { data: null }, highlightSegment: null };
-      return selector(state);
-    });
-
-    const { container } = render(<HighlightSegment />);
+    const { container } = renderWithState(
+      createMockState({ highlightSegment: null })
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
-  it('should render nothing when results data is null', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = {
-        results: { data: null },
-        highlightSegment: { startIndex: 0, endIndex: 1, alternate: 0 },
-      };
-      return selector(state);
-    });
+  it('should render nothing when there are no route results', () => {
+    const { container } = renderWithState(
+      createMockState({ results: { byProfile: [], show: {} } })
+    );
 
-    const { container } = render(<HighlightSegment />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('should render nothing when the referenced profile has no result', () => {
+    const { container } = renderWithState(
+      createMockState({
+        results: { byProfile: [{ profile: 'car', data: carRoute }], show: {} },
+        highlightSegment: {
+          startIndex: 1,
+          endIndex: 2,
+          profile: 'emergency',
+          index: 0,
+        },
+      })
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
   it('should render Source when data is valid', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = createMockState();
-      return selector(state);
-    });
-
-    render(<HighlightSegment />);
+    renderWithState(createMockState());
 
     expect(mockSource).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'highlight-segment', type: 'geojson' })
@@ -89,12 +134,7 @@ describe('HighlightSegment', () => {
   });
 
   it('should render Layer with yellow color', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = createMockState();
-      return selector(state);
-    });
-
-    render(<HighlightSegment />);
+    renderWithState(createMockState());
 
     expect(mockLayer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -106,42 +146,74 @@ describe('HighlightSegment', () => {
   });
 
   it('should slice coordinates based on startIndex and endIndex', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = createMockState();
-      return selector(state);
-    });
+    renderWithState(createMockState());
 
-    render(<HighlightSegment />);
-
-    const sourceCall = mockSource.mock.calls[0]?.[0];
-    const coords = sourceCall?.data.geometry.coordinates;
+    const coords = renderedCoordinates();
     expect(coords).toHaveLength(2);
     expect(coords[0]).toEqual([11, 51]);
     expect(coords[1]).toEqual([12, 52]);
   });
 
-  it('should render nothing when startIndex is -1', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = createMockState({
-        highlightSegment: { startIndex: -1, endIndex: 2, alternate: 0 },
-      });
-      return selector(state);
-    });
+  it('should resolve the segment against the referenced profile', () => {
+    renderWithState(
+      createMockState({
+        highlightSegment: {
+          startIndex: 1,
+          endIndex: 2,
+          profile: 'emergency',
+          index: 0,
+        },
+      })
+    );
 
-    const { container } = render(<HighlightSegment />);
+    const coords = renderedCoordinates();
+    expect(coords[0]).toEqual([31, 71]);
+    expect(coords[1]).toEqual([32, 72]);
+  });
+
+  it("should resolve the segment against that profile's alternate", () => {
+    renderWithState(
+      createMockState({
+        highlightSegment: {
+          startIndex: 1,
+          endIndex: 2,
+          profile: 'car',
+          index: 1,
+        },
+      })
+    );
+
+    const coords = renderedCoordinates();
+    expect(coords[0]).toEqual([21, 61]);
+    expect(coords[1]).toEqual([22, 62]);
+  });
+
+  it('should render nothing when startIndex is -1', () => {
+    const { container } = renderWithState(
+      createMockState({
+        highlightSegment: {
+          startIndex: -1,
+          endIndex: 2,
+          profile: 'car',
+          index: 0,
+        },
+      })
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
   it('should render nothing when endIndex is -1', () => {
-    mockUseDirectionsStore.mockImplementation((selector) => {
-      const state = createMockState({
-        highlightSegment: { startIndex: 0, endIndex: -1, alternate: 0 },
-      });
-      return selector(state);
-    });
-
-    const { container } = render(<HighlightSegment />);
+    const { container } = renderWithState(
+      createMockState({
+        highlightSegment: {
+          startIndex: 0,
+          endIndex: -1,
+          profile: 'car',
+          index: 0,
+        },
+      })
+    );
 
     expect(container.firstChild).toBeNull();
   });

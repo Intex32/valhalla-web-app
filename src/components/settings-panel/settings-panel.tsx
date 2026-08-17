@@ -20,7 +20,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { X, Copy, RotateCcw, SlidersHorizontal, Settings2 } from 'lucide-react';
-import { useParams, useSearch } from '@tanstack/react-router';
+import { useParams } from '@tanstack/react-router';
+import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
@@ -32,7 +33,11 @@ type ProfileWithSettings = Exclude<Profile, 'auto'>;
 const QUICK_SETTING_PARAM_SET: Set<string> = new Set(QUICK_SETTING_PARAMS);
 
 export const SettingsPanel = () => {
-  const { profile } = useSearch({ from: '/$activeTab' });
+  const selectedProfiles = useSelectedProfiles();
+  // The advanced panel shows one option set at a time: the primary profile's.
+  // Values are shared across profiles — `filterProfileSettings` hands each
+  // request only the options its own costing model understands.
+  const profile = selectedProfiles[0]!;
   const { activeTab } = useParams({ from: '/$activeTab' });
   const settings = useCommonStore((state) => state.settings);
   const settingsPanelOpen = useCommonStore((state) => state.settingsPanelOpen);
@@ -85,7 +90,7 @@ export const SettingsPanel = () => {
   }, [profile, settings]);
 
   const resetConfigSettings = useCallback(() => {
-    resetSettings(profile || 'bicycle');
+    resetSettings(profile);
     if (activeTab === 'directions') {
       refetchDirections();
     } else {
@@ -118,6 +123,14 @@ export const SettingsPanel = () => {
         </SheetHeader>
         <div className="px-3 space-y-3">
           <ServerSettings />
+
+          {selectedProfiles.length > 1 && (
+            <p className="text-muted-foreground text-xs">
+              Showing the option set of <strong>{profile}</strong>. These values
+              are shared by every selected profile — each request only receives
+              the options its own costing model supports.
+            </p>
+          )}
 
           {hasProfileSettings && (
             <CollapsibleSection

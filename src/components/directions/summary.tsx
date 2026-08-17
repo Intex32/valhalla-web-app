@@ -21,18 +21,20 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useDirectionsStore } from '@/stores/directions-store';
-import { useCommonStore } from '@/stores/common-store';
+import { useDirectionsStore, routeKey } from '@/stores/directions-store';
+import { useCommonStore, type Profile } from '@/stores/common-store';
 import { useMap } from 'react-map-gl/maplibre';
 
 export const Summary = ({
   summary,
   title,
+  profile,
   index,
   routeCoordinates,
 }: {
   summary: SummaryType;
   title: string;
+  profile: Profile;
   index: number;
   routeCoordinates: number[][];
 }) => {
@@ -49,7 +51,7 @@ export const Summary = ({
   const { mainMap } = useMap();
 
   const handleChange = (checked: boolean) => {
-    toggleShowOnMap({ show: checked, idx: index });
+    toggleShowOnMap({ show: checked, profile, index });
   };
 
   const handleRecenter = () => {
@@ -148,8 +150,8 @@ export const Summary = ({
         </div>
         <div className="col-span-2 flex items-center justify-end gap-1">
           <Switch
-            id="show-on-map"
-            checked={results.show[index]}
+            id={`show-on-map-${routeKey(profile, index)}`}
+            checked={results.show[routeKey(profile, index)] ?? true}
             onCheckedChange={handleChange}
           />
           {successful && (

@@ -8,15 +8,18 @@ export function IsochroneLocations() {
   const isoSuccessful = useIsochronesStore((state) => state.successful);
 
   const data = useMemo(() => {
-    if (!isoResults || !isoSuccessful) return null;
-    if (!isoResults.data || !isoResults.show) return null;
+    if (!isoSuccessful) return null;
 
-    const hasNoFeatures = Object.keys(isoResults.data).length === 0;
-    if (hasNoFeatures) return null;
+    // Every profile snaps to the same centre, so one profile's locations are
+    // enough — drawing them all would just stack identical circles.
+    const first = isoResults.byProfile.find(
+      ({ profile }) => isoResults.show[profile] !== false
+    );
+    if (!first) return null;
 
     const features: Feature[] = [];
 
-    for (const feature of isoResults.data.features) {
+    for (const feature of first.data.features) {
       if (!['Polygon', 'MultiPolygon'].includes(feature.geometry.type)) {
         if (feature.properties?.type !== 'input') {
           features.push(feature);

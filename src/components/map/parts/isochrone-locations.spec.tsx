@@ -23,23 +23,36 @@ vi.mock('@/stores/isochrones-store', () => ({
     mockUseIsochronesStore(selector),
 }));
 
+const snappedPoint = (coordinates: number[]) => ({
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates },
+  properties: { type: 'snapped' },
+});
+
+const isochroneResponse = (coordinates: number[]) => ({
+  type: 'FeatureCollection',
+  features: [snappedPoint(coordinates)],
+});
+
 const createMockState = (overrides = {}) => ({
   results: {
-    data: {
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [10, 50] },
-          properties: { type: 'snapped' },
-        },
-      ],
-    },
-    show: true,
+    byProfile: [{ profile: 'car', data: isochroneResponse([10, 50]) }],
+    show: { car: true },
   },
   successful: true,
   ...overrides,
 });
+
+const renderWithState = (state: unknown) => {
+  mockUseIsochronesStore.mockImplementation((selector) => selector(state));
+  return render(<IsochroneLocations />);
+};
+
+const renderedFeatures = () =>
+  mockSource.mock.calls[0]?.[0]?.data.features as {
+    geometry: { type: string; coordinates: number[] };
+    properties: Record<string, unknown>;
+  }[];
 
 describe('IsochroneLocations', () => {
   beforeEach(() => {
@@ -48,48 +61,37 @@ describe('IsochroneLocations', () => {
     mockUseIsochronesStore.mockClear();
   });
 
-  it('should render nothing when results is null', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = { results: null, successful: false };
-      return selector(state);
-    });
-
-    const { container } = render(<IsochroneLocations />);
+  it('should render nothing when no profile returned isochrones', () => {
+    const { container } = renderWithState(
+      createMockState({ results: { byProfile: [], show: {} } })
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
   it('should render nothing when not successful', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = createMockState({ successful: false });
-      return selector(state);
-    });
-
-    const { container } = render(<IsochroneLocations />);
+    const { container } = renderWithState(
+      createMockState({ successful: false })
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
-  it('should render nothing when show is false', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = createMockState({
-        results: { ...createMockState().results, show: false },
-      });
-      return selector(state);
-    });
-
-    const { container } = render(<IsochroneLocations />);
+  it('should render nothing when every profile is hidden', () => {
+    const { container } = renderWithState(
+      createMockState({
+        results: {
+          byProfile: [{ profile: 'car', data: isochroneResponse([10, 50]) }],
+          show: { car: false },
+        },
+      })
+    );
 
     expect(container.firstChild).toBeNull();
   });
 
   it('should render Source when data is valid', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = createMockState();
-      return selector(state);
-    });
-
-    render(<IsochroneLocations />);
+    renderWithState(createMockState());
 
     expect(mockSource).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'iso-locations', type: 'geojson' })
@@ -97,12 +99,7 @@ describe('IsochroneLocations', () => {
   });
 
   it('should render Layer with circle type', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = createMockState();
-      return selector(state);
-    });
-
-    render(<IsochroneLocations />);
+    renderWithState(createMockState());
 
     expect(mockLayer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -113,12 +110,7 @@ describe('IsochroneLocations', () => {
   });
 
   it('should render Layer with correct paint properties', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = createMockState();
-      return selector(state);
-    });
-
-    render(<IsochroneLocations />);
+    renderWithState(createMockState());
 
     expect(mockLayer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -133,68 +125,98 @@ describe('IsochroneLocations', () => {
   });
 
   it('should filter out Polygon features', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = {
+    renderWithState(
+      createMockState({
         results: {
-          data: {
-            type: 'FeatureCollection',
-            features: [
-              {
-                type: 'Feature',
-                geometry: { type: 'Polygon', coordinates: [] },
-                properties: { fill: '#ff0000' },
+          byProfile: [
+            {
+              profile: 'car',
+              data: {
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'Polygon', coordinates: [] },
+                    properties: { fill: '#ff0000' },
+                  },
+                  snappedPoint([0, 0]),
+                ],
               },
-              {
-                type: 'Feature',
-                geometry: { type: 'Point', coordinates: [0, 0] },
-                properties: { type: 'snapped' },
-              },
-            ],
-          },
-          show: true,
+            },
+          ],
+          show: { car: true },
         },
-        successful: true,
-      };
-      return selector(state);
-    });
+      })
+    );
 
-    render(<IsochroneLocations />);
-
-    const sourceCall = mockSource.mock.calls[0]?.[0];
-    expect(sourceCall?.data.features).toHaveLength(1);
-    expect(sourceCall?.data.features[0].geometry.type).toBe('Point');
+    const features = renderedFeatures();
+    expect(features).toHaveLength(1);
+    expect(features?.[0]?.geometry.type).toBe('Point');
   });
 
   it('should filter out input type features', () => {
-    mockUseIsochronesStore.mockImplementation((selector) => {
-      const state = {
+    renderWithState(
+      createMockState({
         results: {
-          data: {
-            type: 'FeatureCollection',
-            features: [
-              {
-                type: 'Feature',
-                geometry: { type: 'Point', coordinates: [0, 0] },
-                properties: { type: 'input' },
+          byProfile: [
+            {
+              profile: 'car',
+              data: {
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [0, 0] },
+                    properties: { type: 'input' },
+                  },
+                  snappedPoint([1, 1]),
+                ],
               },
-              {
-                type: 'Feature',
-                geometry: { type: 'Point', coordinates: [1, 1] },
-                properties: { type: 'snapped' },
-              },
-            ],
-          },
-          show: true,
+            },
+          ],
+          show: { car: true },
         },
-        successful: true,
-      };
-      return selector(state);
-    });
+      })
+    );
 
-    render(<IsochroneLocations />);
+    const features = renderedFeatures();
+    expect(features).toHaveLength(1);
+    expect(features?.[0]?.properties.type).toBe('snapped');
+  });
 
-    const sourceCall = mockSource.mock.calls[0]?.[0];
-    expect(sourceCall?.data.features).toHaveLength(1);
-    expect(sourceCall?.data.features[0].properties.type).toBe('snapped');
+  it('should draw locations from the first visible profile only', () => {
+    renderWithState(
+      createMockState({
+        results: {
+          byProfile: [
+            { profile: 'car', data: isochroneResponse([10, 50]) },
+            { profile: 'emergency', data: isochroneResponse([20, 60]) },
+          ],
+          show: { car: true, emergency: true },
+        },
+      })
+    );
+
+    const features = renderedFeatures();
+    expect(features).toHaveLength(1);
+    expect(features?.[0]?.geometry.coordinates).toEqual([10, 50]);
+  });
+
+  it('should fall back to the next profile when the first one is hidden', () => {
+    renderWithState(
+      createMockState({
+        results: {
+          byProfile: [
+            { profile: 'car', data: isochroneResponse([10, 50]) },
+            { profile: 'emergency', data: isochroneResponse([20, 60]) },
+          ],
+          show: { car: false, emergency: true },
+        },
+      })
+    );
+
+    const features = renderedFeatures();
+    expect(features).toHaveLength(1);
+    expect(features?.[0]?.geometry.coordinates).toEqual([20, 60]);
   });
 });

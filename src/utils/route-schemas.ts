@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { fallback } from '@tanstack/zod-adapter';
-import { profileEnum } from '../stores/common-store';
 import { mapStyleSchema } from '../components/map/utils';
 import { languageOptions } from '../components/settings-panel/settings-options';
+import { DEFAULT_PROFILE, parseProfiles } from './profiles';
 
 const languageValues = languageOptions.map((opt) => opt.value) as [
   string,
@@ -18,8 +18,15 @@ const willingness = z
     message: 'must be 0, 0.5, or 1',
   });
 
+// Kept as a raw string rather than an array so the URL stays readable
+// (`?profile=car,emergency`); use `parseProfiles` to get the list back.
+const profileListSchema = z.string().refine(
+  (value) => parseProfiles(value).length > 0,
+  (value) => ({ message: `no known costing profile in "${value}"` })
+);
+
 export const searchParamsSchema = z.object({
-  profile: fallback(profileEnum.optional(), 'bicycle'),
+  profile: fallback(profileListSchema.optional(), DEFAULT_PROFILE),
   wps: z.string().optional(),
   range: z.number().optional(),
   interval: z.number().optional(),

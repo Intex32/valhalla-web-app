@@ -19,26 +19,26 @@ import {
 } from '@/utils/nominatim';
 import { filterProfileSettings } from '@/utils/filter-profile-settings';
 import { calcArea } from '@/utils/geom';
-import { useCommonStore } from '@/stores/common-store';
-import { useIsochronesStore } from '@/stores/isochrones-store';
+import { useCommonStore, type Profile } from '@/stores/common-store';
+import {
+  useIsochronesStore,
+  type ProfileIsochroneResult,
+} from '@/stores/isochrones-store';
+import { getProfileLabel, parseProfilesWithFallback } from '@/utils/profiles';
 import { router } from '@/routes';
 
-async function fetchIsochrones() {
-  const { geocodeResults, maxRange, interval, denoise, generalize } =
+async function fetchIsochronesForProfile(
+  profile: Profile,
+  center: Center
+): Promise<ValhallaIsochroneResponse> {
+  const { maxRange, interval, denoise, generalize } =
     useIsochronesStore.getState();
-  const profile = router.state.location.search.profile;
   const { settings: rawSettings } = useCommonStore.getState();
-
-  const settings = filterProfileSettings(profile || 'bicycle', rawSettings);
-  const center = geocodeResults.find((result) => result.selected);
-
-  if (!center) {
-    return null;
-  }
+  const settings = filterProfileSettings(profile, rawSettings);
 
   const valhallaRequest = buildIsochronesRequest({
-    profile: profile || 'bicycle',
-    center: center as Center,
+    profile,
+    center,
     // @ts-expect-error todo: initial settings and filtered settings types mismatch
     settings,
     maxRange,
@@ -75,36 +75,79 @@ async function fetchIsochrones() {
   return data;
 }
 
+/** Requests contours around the same centre for every selected profile. */
+async function fetchIsochrones(): Promise<ProfileIsochroneResult[] | null> {
+  const { geocodeResults } = useIsochronesStore.getState();
+  const profiles = parseProfilesWithFallback(
+    router.state.location.search.profile
+  );
+  const center = geocodeResults.find((result) => result.selected);
+
+  if (!center) {
+    return null;
+  }
+
+  const settled = await Promise.allSettled(
+    profiles.map((profile) =>
+      fetchIsochronesForProfile(profile, center as Center)
+    )
+  );
+
+  const results: ProfileIsochroneResult[] = [];
+  const failures: string[] = [];
+
+  settled.forEach((outcome, i) => {
+    const profile = profiles[i]!;
+    if (outcome.status === 'fulfilled') {
+      results.push({ profile, data: outcome.value });
+    } else {
+      const reason =
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : 'Failed to fetch isochrones';
+      failures.push(`${getProfileLabel(profile)}: ${reason}`);
+    }
+  });
+
+  if (failures.length > 0) {
+    toast.warning(
+      failures.length === profiles.length
+        ? 'No isochrones could be calculated'
+        : 'Some profiles returned no isochrone',
+      {
+        description: failures.join('\n'),
+        position: 'bottom-center',
+        duration: 5000,
+        closeButton: true,
+      }
+    );
+  }
+
+  if (results.length === 0) {
+    throw new Error(failures[0] ?? 'Failed to fetch isochrones');
+  }
+
+  return results;
+}
+
 export function useIsochronesQuery() {
   const showLoading = useCommonStore((state) => state.showLoading);
+  const receiveIsochroneResults = useIsochronesStore(
+    (state) => state.receiveIsochroneResults
+  );
 
   return useQuery({
     queryKey: ['isochrones'],
     queryFn: async () => {
       showLoading(true);
       try {
-        const data = await fetchIsochrones();
-        if (data) {
-          useIsochronesStore.setState((state) => {
-            state.results.data = data;
-            state.successful = true;
-          });
+        const results = await fetchIsochrones();
+        if (results) {
+          receiveIsochroneResults(results);
         }
-        return data;
+        return results;
       } catch (error) {
-        useIsochronesStore.setState((state) => {
-          state.results.data = null;
-          state.successful = false;
-        });
-
-        if (error instanceof Error) {
-          toast.warning('Error', {
-            description: error.message || 'Failed to fetch isochrones',
-            position: 'bottom-center',
-            duration: 5000,
-            closeButton: true,
-          });
-        }
+        receiveIsochroneResults([]);
         throw error;
       } finally {
         setTimeout(() => showLoading(false), 500);

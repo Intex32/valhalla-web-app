@@ -32,6 +32,7 @@ import {
 } from '@/utils/directions-language';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
+import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
 import type { PossibleSettings } from '@/components/types';
 
 type IconState = 'no' | 'yes' | 'preferred';
@@ -105,7 +106,7 @@ export const QuickSettings = ({
 }: QuickSettingsProps) => {
   const search = useSearch({ from: '/$activeTab' });
   const navigate = useNavigate({ from: '/$activeTab' });
-  const { profile } = search;
+  const selectedProfiles = useSelectedProfiles();
   const settings = useCommonStore((state) => state.settings);
   const updateSettings = useCommonStore((state) => state.updateSettings);
   const dateTime = useCommonStore((state) => state.dateTime);
@@ -125,9 +126,11 @@ export const QuickSettings = ({
     return getDirectionsLanguage();
   });
 
-  const supportsHighwayToll = profile
-    ? (HIGHWAY_TOLL_PROFILES as readonly string[]).includes(profile)
-    : false;
+  // Shown as soon as one selected profile understands the option — the others
+  // simply ignore it in their costing_options.
+  const supportsHighwayToll = selectedProfiles.some((selected) =>
+    (HIGHWAY_TOLL_PROFILES as readonly string[]).includes(selected)
+  );
 
   // Hydrate store from URL on mount (URL wins when present).
   const urlSettingsHydrated = useRef(false);

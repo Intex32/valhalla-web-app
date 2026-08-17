@@ -16,28 +16,28 @@ import {
 import { forward_geocode, parseGeocodeResponse } from '@/utils/nominatim';
 import { filterProfileSettings } from '@/utils/filter-profile-settings';
 import { getDirectionsLanguage } from '@/utils/directions-language';
-import { useCommonStore } from '@/stores/common-store';
-import { useDirectionsStore, type Waypoint } from '@/stores/directions-store';
+import { useCommonStore, type Profile } from '@/stores/common-store';
+import {
+  useDirectionsStore,
+  type ProfileRouteResult,
+  type Waypoint,
+} from '@/stores/directions-store';
+import { getProfileLabel, parseProfilesWithFallback } from '@/utils/profiles';
 import { router } from '@/routes';
 
 const getActiveWaypoints = (waypoints: Waypoint[]): ActiveWaypoint[] =>
   waypoints.flatMap((wp) => wp.geocodeResults.filter((r) => r.selected));
 
-async function fetchDirections() {
-  const waypoints = useDirectionsStore.getState().waypoints;
-  const profile = router.state.location.search.profile;
+async function fetchDirectionsForProfile(
+  profile: Profile,
+  activeWaypoints: ActiveWaypoint[]
+): Promise<ParsedDirectionsGeometry> {
   const { dateTime, settings: rawSettings } = useCommonStore.getState();
-
-  const activeWaypoints = getActiveWaypoints(waypoints);
-  if (activeWaypoints.length < 2) {
-    return null;
-  }
-
-  const settings = filterProfileSettings(profile || 'bicycle', rawSettings);
+  const settings = filterProfileSettings(profile, rawSettings);
   const language = getDirectionsLanguage();
 
   const valhallaRequest = buildDirectionsRequest({
-    profile: profile || 'bicycle',
+    profile,
     activeWaypoints,
     // @ts-expect-error todo: initial settings and filtered settings types mismatch
     settings,
@@ -86,6 +86,65 @@ async function fetchDirections() {
   return data as ParsedDirectionsGeometry;
 }
 
+/**
+ * Routes every selected profile between the same waypoints. Profiles are
+ * requested concurrently and settled independently, so one costing model the
+ * server rejects doesn't hide the routes that did come back.
+ */
+async function fetchDirections(): Promise<ProfileRouteResult[] | null> {
+  const waypoints = useDirectionsStore.getState().waypoints;
+  const profiles = parseProfilesWithFallback(
+    router.state.location.search.profile
+  );
+
+  const activeWaypoints = getActiveWaypoints(waypoints);
+  if (activeWaypoints.length < 2) {
+    return null;
+  }
+
+  const settled = await Promise.allSettled(
+    profiles.map((profile) =>
+      fetchDirectionsForProfile(profile, activeWaypoints)
+    )
+  );
+
+  const results: ProfileRouteResult[] = [];
+  const failures: string[] = [];
+
+  settled.forEach((outcome, i) => {
+    const profile = profiles[i]!;
+    if (outcome.status === 'fulfilled') {
+      results.push({ profile, data: outcome.value });
+    } else {
+      const reason =
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : 'Could not fetch resource';
+      failures.push(`${getProfileLabel(profile)}: ${reason}`);
+    }
+  });
+
+  if (failures.length > 0) {
+    toast.warning(
+      failures.length === profiles.length
+        ? 'No routes could be calculated'
+        : 'Some profiles returned no route',
+      {
+        description: failures.join('\n'),
+        position: 'bottom-center',
+        duration: 5000,
+        closeButton: true,
+      }
+    );
+  }
+
+  if (results.length === 0) {
+    throw new Error(failures[0] ?? 'Could not fetch resource');
+  }
+
+  return results;
+}
+
 export function useDirectionsQuery() {
   const showLoading = useCommonStore((state) => state.showLoading);
   const zoomTo = useCommonStore((state) => state.zoomTo);
@@ -99,22 +158,15 @@ export function useDirectionsQuery() {
     queryFn: async () => {
       showLoading(true);
       try {
-        const data = await fetchDirections();
-        if (data) {
-          receiveRouteResults({ data });
-          zoomTo(data.decodedGeometry);
+        const results = await fetchDirections();
+        if (results) {
+          receiveRouteResults({ results });
+          // Fit every profile's route, not just the first one.
+          zoomTo(results.flatMap((result) => result.data.decodedGeometry));
         }
-        return data;
+        return results;
       } catch (error) {
         clearRoutes();
-        if (error instanceof Error) {
-          toast.warning('Error', {
-            description: error.message,
-            position: 'bottom-center',
-            duration: 5000,
-            closeButton: true,
-          });
-        }
         throw error;
       } finally {
         setTimeout(() => showLoading(false), 500);

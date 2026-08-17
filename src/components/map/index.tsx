@@ -59,8 +59,9 @@ import {
 import { MarkerIcon, type MarkerColor } from './parts/marker-icon';
 import { maxBounds } from './constants';
 import { getInitialMapPosition, LAST_CENTER_KEY } from './utils';
-import { useCommonStore } from '@/stores/common-store';
-import { useDirectionsStore } from '@/stores/directions-store';
+import { useCommonStore, type Profile } from '@/stores/common-store';
+import { useDirectionsStore, getRouteAt } from '@/stores/directions-store';
+import { isValidProfile } from '@/components/utils';
 import { useIsochronesStore } from '@/stores/isochrones-store';
 import {
   useDirectionsQuery,
@@ -119,9 +120,8 @@ export const MapComponent = () => {
   const updateInclineDecline = useDirectionsStore(
     (state) => state.updateInclineDecline
   );
-  const setActiveRouteIndex = useDirectionsStore(
-    (state) => state.setActiveRouteIndex
-  );
+  const activeRoute = useDirectionsStore((state) => state.activeRoute);
+  const setActiveRoute = useDirectionsStore((state) => state.setActiveRoute);
 
   const { refetch: refetchDirections } = useDirectionsQuery();
   const { refetch: refetchIsochrones } = useIsochronesQuery();
@@ -333,10 +333,14 @@ export const MapComponent = () => {
   }, [popupLngLat, updateIsoPosition]);
 
   const getHeightData = useCallback(async () => {
-    if (!directionResults.data?.decodedGeometry) return;
+    // The elevation profile describes one line — use whichever route is active.
+    const activeGeometry = activeRoute
+      ? getRouteAt(directionResults.byProfile, activeRoute)?.decodedGeometry
+      : undefined;
+    if (!activeGeometry) return;
 
     const heightPayloadNew = buildHeightRequest(
-      directionResults.data.decodedGeometry as [number, number][]
+      activeGeometry as [number, number][]
     );
 
     if (JSON.stringify(heightPayload) !== JSON.stringify(heightPayloadNew)) {
@@ -359,11 +363,11 @@ export const MapComponent = () => {
 
         const data = await response.json();
 
-        const reversedGeometry = JSON.parse(
-          JSON.stringify(directionResults.data?.decodedGeometry)
-        ).map((pair: number[]) => {
-          return [...pair.reverse()];
-        });
+        const reversedGeometry = JSON.parse(JSON.stringify(activeGeometry)).map(
+          (pair: number[]) => {
+            return [...pair.reverse()];
+          }
+        );
         const heightData = buildHeightgraphData(
           reversedGeometry,
           data.range_height
@@ -380,7 +384,7 @@ export const MapComponent = () => {
         setIsHeightLoading(false);
       }
     }
-  }, [directionResults, heightPayload, updateInclineDecline]);
+  }, [directionResults, activeRoute, heightPayload, updateInclineDecline]);
 
   // Update markers when waypoints or isochrone centers change
   const geocodeResults = useIsochronesStore((state) => state.geocodeResults);
@@ -582,9 +586,13 @@ export const MapComponent = () => {
 
       if (
         routeFeature &&
-        typeof routeFeature.properties?.routeIndex === 'number'
+        typeof routeFeature.properties?.routeIndex === 'number' &&
+        isValidProfile(String(routeFeature.properties.profile))
       ) {
-        setActiveRouteIndex(routeFeature.properties.routeIndex);
+        setActiveRoute({
+          profile: routeFeature.properties.profile as Profile,
+          index: routeFeature.properties.routeIndex,
+        });
         return;
       }
 
@@ -618,7 +626,7 @@ export const MapComponent = () => {
       cancelPendingClick,
       activeTab,
       handleMapTilesClick,
-      setActiveRouteIndex,
+      setActiveRoute,
     ]
   );
 

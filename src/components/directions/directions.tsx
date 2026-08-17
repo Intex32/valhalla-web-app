@@ -13,6 +13,9 @@ import { parseUrlParams } from '@/utils/parse-url-params';
 import { isValidCoordinates } from '@/utils/geom';
 import { useNavigate } from '@tanstack/react-router';
 import { useDirectionsStore } from '@/stores/directions-store';
+import type { Profile } from '@/stores/common-store';
+import { getProfileColor } from '@/utils/profile-colors';
+import { getProfileLabel } from '@/utils/profiles';
 import {
   useDirectionsQuery,
   useSetWaypointFromCoords,
@@ -40,12 +43,11 @@ export const DirectionsControl = () => {
   const { setWaypointFromCoords } = useSetWaypointFromCoords();
   const { optimizeRoute, isPending: isOptimizing } = useOptimizedRouteQuery();
   const isOptimized = useDirectionsStore((state) => state.isOptimized);
-  const activeRouteIndex = useDirectionsStore(
-    (state) => state.activeRouteIndex
-  );
-  const setActiveRouteIndex = useDirectionsStore(
-    (state) => state.setActiveRouteIndex
-  );
+  const activeRoute = useDirectionsStore((state) => state.activeRoute);
+  const setActiveRoute = useDirectionsStore((state) => state.setActiveRoute);
+
+  const isActiveRoute = (profile: Profile, index: number) =>
+    activeRoute?.profile === profile && activeRoute.index === index;
 
   useEffect(() => {
     if (urlParamsProcessed.current) return;
@@ -162,24 +164,44 @@ export const DirectionsControl = () => {
       </div>
       <QuickSettings />
       <SettingsFooter />
-      {results.data && (
+      {results.byProfile.length > 0 && (
         <div>
           <h3 className="font-bold mb-2">Directions</h3>
-          <div className="flex flex-col gap-3">
-            <RouteCard
-              data={results.data}
-              index={0}
-              isActive={activeRouteIndex === 0}
-              onSelect={() => setActiveRouteIndex(0)}
-            />
-            {results.data.alternates?.map((alternate, index) => (
-              <RouteCard
-                data={alternate as ParsedDirectionsGeometry}
-                key={alternate.id}
-                index={index + 1}
-                isActive={activeRouteIndex === index + 1}
-                onSelect={() => setActiveRouteIndex(index + 1)}
-              />
+          <div className="flex flex-col gap-4">
+            {results.byProfile.map(({ profile, data }) => (
+              <div key={profile} className="flex flex-col gap-2">
+                {results.byProfile.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="size-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: getProfileColor(profile) }}
+                    />
+                    <span className="text-sm font-semibold">
+                      {getProfileLabel(profile)}
+                    </span>
+                  </div>
+                )}
+                <RouteCard
+                  data={data}
+                  profile={profile}
+                  index={0}
+                  isActive={isActiveRoute(profile, 0)}
+                  onSelect={() => setActiveRoute({ profile, index: 0 })}
+                />
+                {data.alternates?.map((alternate, index) => (
+                  <RouteCard
+                    data={alternate as ParsedDirectionsGeometry}
+                    key={alternate.id}
+                    profile={profile}
+                    index={index + 1}
+                    isActive={isActiveRoute(profile, index + 1)}
+                    onSelect={() =>
+                      setActiveRoute({ profile, index: index + 1 })
+                    }
+                  />
+                ))}
+              </div>
             ))}
           </div>
         </div>

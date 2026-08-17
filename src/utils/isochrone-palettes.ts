@@ -37,7 +37,7 @@ export function isPaletteId(value: string): value is PaletteId {
   return ISOCHRONE_PALETTES.some((p) => p.id === value);
 }
 
-function interpolateHex(c1: string, c2: string, t: number): string {
+export function interpolateHex(c1: string, c2: string, t: number): string {
   const r1 = parseInt(c1.slice(1, 3), 16);
   const g1 = parseInt(c1.slice(3, 5), 16);
   const b1 = parseInt(c1.slice(5, 7), 16);

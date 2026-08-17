@@ -22,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { ProfilePicker } from './profile-picker';
 import type { Profile } from '@/stores/common-store';
+import { serializeProfiles } from '@/utils/profiles';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
 
@@ -74,9 +75,9 @@ export const RoutePlanner = () => {
     navigate({ params: { activeTab: value } });
   };
 
-  const handleProfileChange = (value: Profile) => {
+  const handleProfileChange = (value: Profile[]) => {
     navigate({
-      search: (prev) => ({ ...prev, profile: value }),
+      search: (prev) => ({ ...prev, profile: serializeProfiles(value) }),
       replace: true,
     });
 

@@ -1,83 +1,71 @@
 import { useMemo } from 'react';
 import { Source, Layer } from 'react-map-gl/maplibre';
-import { useDirectionsStore } from '@/stores/directions-store';
-import { routeObjects } from '../constants';
+import { useDirectionsStore, routeKey } from '@/stores/directions-store';
+import { getRouteColor } from '@/utils/profile-colors';
 import type { Feature, FeatureCollection, LineString } from 'geojson';
 import type { ParsedDirectionsGeometry } from '@/components/types';
+import type { Profile } from '@/stores/common-store';
 
 export function RouteLines() {
   const directionResults = useDirectionsStore((state) => state.results);
   const directionsSuccessful = useDirectionsStore((state) => state.successful);
-  const activeRouteIndex = useDirectionsStore(
-    (state) => state.activeRouteIndex
-  );
+  const activeRoute = useDirectionsStore((state) => state.activeRoute);
 
   const data = useMemo(() => {
-    if (!directionResults.data || !directionsSuccessful) return null;
+    if (!directionsSuccessful) return null;
+    if (directionResults.byProfile.length === 0) return null;
 
-    const hasNoData = Object.keys(directionResults.data).length === 0;
-    if (hasNoData) return null;
-
-    const response = directionResults.data;
     const showRoutes = directionResults.show || {};
     const features: Feature<LineString>[] = [];
 
-    if (response.alternates) {
-      response.alternates.forEach((alternate, i) => {
-        if (!showRoutes[i + 1]) return;
-        const coords = (alternate! as ParsedDirectionsGeometry)!
-          .decodedGeometry;
-        const summary = alternate!.trip.summary;
-        const isActive = activeRouteIndex === i + 1;
+    const addRoute = (
+      profile: Profile,
+      index: number,
+      route: ParsedDirectionsGeometry
+    ) => {
+      if (showRoutes[routeKey(profile, index)] === false) return;
 
-        features.push({
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: coords.map((c) => [c[1] ?? 0, c[0] ?? 0]),
-          },
-          properties: {
-            color: isActive ? routeObjects.color : routeObjects.inactiveColor,
-            type: 'alternate',
-            routeIndex: i + 1,
-            summary,
-          },
-        });
-      });
-    }
-
-    if (showRoutes[0] !== false) {
-      const coords = response.decodedGeometry;
-      const summary = response.trip.summary;
-      const isActive = activeRouteIndex === 0;
+      const isActive =
+        activeRoute?.profile === profile && activeRoute.index === index;
 
       features.push({
         type: 'Feature',
         geometry: {
           type: 'LineString',
-          coordinates: coords.map((c) => [c[1] ?? 0, c[0] ?? 0]),
+          coordinates: route.decodedGeometry.map((c) => [c[1] ?? 0, c[0] ?? 0]),
         },
         properties: {
-          color: isActive ? routeObjects.color : routeObjects.inactiveColor,
-          type: 'main',
-          routeIndex: 0,
-          summary,
+          color: getRouteColor(profile, index),
+          type: index === 0 ? 'main' : 'alternate',
+          profile,
+          routeIndex: index,
+          isActive,
+          summary: route.trip.summary,
         },
       });
+    };
+
+    for (const { profile, data: response } of directionResults.byProfile) {
+      response.alternates?.forEach((alternate, i) => {
+        if (alternate) {
+          addRoute(profile, i + 1, alternate as ParsedDirectionsGeometry);
+        }
+      });
+      addRoute(profile, 0, response);
     }
 
-    // Sort so active route renders last (on top)
-    features.sort((a, b) => {
-      const aActive = a.properties?.routeIndex === activeRouteIndex ? 1 : 0;
-      const bActive = b.properties?.routeIndex === activeRouteIndex ? 1 : 0;
-      return aActive - bActive;
-    });
+    // Sort so the active route renders last (on top).
+    features.sort(
+      (a, b) =>
+        Number(Boolean(a.properties?.isActive)) -
+        Number(Boolean(b.properties?.isActive))
+    );
 
     return {
       type: 'FeatureCollection',
       features,
     } as FeatureCollection;
-  }, [directionResults, directionsSuccessful, activeRouteIndex]);
+  }, [directionResults, directionsSuccessful, activeRoute]);
 
   if (!data) return null;
 
@@ -97,18 +85,13 @@ export function RouteLines() {
         type="line"
         paint={{
           'line-color': ['get', 'color'],
-          'line-width': 5,
-          'line-opacity': [
-            'case',
-            ['==', ['get', 'routeIndex'], activeRouteIndex],
-            1,
-            0.5,
-          ],
+          'line-width': ['case', ['get', 'isActive'], 6, 4],
+          'line-opacity': ['case', ['get', 'isActive'], 1, 0.6],
         }}
       />
       {/* Transparent wide line on top — used purely as a hit target so hover
           and click trigger when the cursor is near the route. ~5px of extra
-          padding on each side of the visible 5px stroke. */}
+          padding on each side of the visible stroke. */}
       <Layer
         id="routes-hit-target"
         type="line"

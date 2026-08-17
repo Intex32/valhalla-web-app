@@ -57,7 +57,9 @@ src/index.tsx                      Mounts <RouterProvider> wrapped in TanStackQu
 
 `<App/>` (`src/app.tsx`) wraps everything in `MapProvider` and renders three siblings: `MapComponent`, `RoutePlanner`, `SettingsPanel`, plus a sonner `<Toaster/>`.
 
-URL search params are the source of truth for `profile` (costing model) and `style` (map style); a `retainSearchParams` middleware keeps them across tab switches. Schema is in `src/utils/route-schemas.ts`.
+URL search params are the source of truth for `profile` (costing models) and `style` (map style); a `retainSearchParams` middleware keeps them across tab switches. Schema is in `src/utils/route-schemas.ts`.
+
+`profile` holds a **comma-separated list** of costing models (`?profile=car,emergency`) — the app routes every selected profile between the same waypoints so they can be compared. It stays a raw string in the URL so permalinks remain readable and pre-multi-select links (`?profile=car`) keep working; `src/utils/profiles.ts` turns it into a `Profile[]`, and `src/hooks/use-selected-profiles.ts` exposes `useSelectedProfiles()` / `usePrimaryProfile()`. The **primary** profile is simply the first in the list: it drives the advanced settings panel and single-route actions (optimized route, elevation profile).
 
 The Vite `base` is derived from `package.json` `homepage` (see `vite.config.ts → getBaseUrl()`), and the router uses `import.meta.env.BASE_URL`. The PR-preview workflow rewrites `homepage` before building so the bundle is served from `/{PR_NUMBER}/`.
 
@@ -66,8 +68,10 @@ The Vite `base` is derived from `package.json` `homepage` (see `vite.config.ts �
 Three Zustand stores, each with `immer` + `devtools`:
 
 - `src/stores/common-store.ts` — settings panel/directions panel open state, costing settings, dateTime, map-ready flag. `Profile` enum and `profileEnum` zod schema live here.
-- `src/stores/directions-store.ts` — waypoints (with geocode results), route results, highlighted maneuver, optimized-route flag, active-route index.
-- `src/stores/isochrones-store.ts` — input/result, range/interval/denoise/generalize, color palette, opacity.
+- `src/stores/directions-store.ts` — waypoints (with geocode results), route results, highlighted maneuver, optimized-route flag, active route.
+- `src/stores/isochrones-store.ts` — input/results, range/interval/denoise/generalize, color palette, opacity.
+
+Both result stores are keyed by profile. `directions-store` holds `results.byProfile: { profile, data }[]` (one Valhalla `/route` response per selected profile, in selection order) and `results.show`, a per-route visibility map keyed by `routeKey(profile, index)` where index 0 is the main route and 1..n are that profile's alternates. `activeRoute: { profile, index } | null` identifies the highlighted route; `getRouteAt()` resolves a `RouteRef` back to a response. `isochrones-store` mirrors this with `results.byProfile` and a per-profile `results.show`.
 
 ### Costing profiles
 
@@ -75,12 +79,14 @@ Adding a profile touches five places, all of which must agree or TypeScript will
 
 `emergency` is a **fork-specific** costing model — it only exists on our own Valhalla deployment, not upstream. It is `auto`-derived, so it exposes the same option set as `car`.
 
+Several profiles can be selected at once (`ProfilePicker` is a multi-select `ToggleGroup`; at least one must stay selected). The query hooks fan out one request per profile with `Promise.allSettled`, so a costing model the server rejects doesn't hide the profiles that did return — failures are collected into a single toast. Each profile gets its own `filterProfileSettings()` pass, so it only receives the options its costing model understands; the underlying settings values are shared across profiles, which is what makes a like-for-like comparison possible. Per-profile colours live in `src/utils/profile-colors.ts` and are used by the picker swatches, route lines, route cards and isochrone polygons alike. Isochrones keep the user's palette when a single profile is selected and switch to per-profile colour ramps when several are.
+
 Server-state lives in TanStack Query. The global `QueryClient` (`src/lib/tanstack-query/root-provider.tsx`) sets `refetchOnWindowFocus: false`, `retry: 1`, `staleTime: 5min`, `gcTime: 10min`. Query hooks are in `src/hooks/use-*-queries.ts`. They read inputs directly from Zustand stores via `useStore.getState()` and from the router via `router.state.location.search` rather than parameters — keep that pattern when adding new queries.
 
 ### Components
 
 - `src/components/map/` — MapLibre map. `index.tsx` is the orchestrator; `parts/` holds map sublayers (route lines, isochrone polygons, hover popups, draw controls, marker icons). `valhalla-layers.ts` defines internal Valhalla edge/node/shortcut/access-restriction MVT layer IDs.
-- `src/components/directions/`, `src/components/isochrones/`, `src/components/tiles/` — the three tab panels.
+- `src/components/directions/`, `src/components/isochrones/`, `src/components/tiles/` — the three tab panels. The directions and isochrones panels group their results by profile, one card per profile (plus one per alternate for directions), each tagged with the profile's colour. `isochrone-visualization.tsx` holds the palette/opacity controls that apply to the whole isochrone layer, so they sit above the per-profile cards rather than inside one of them.
 - `src/components/quick-settings.tsx` — left-sidebar "General settings" collapsible panel. Hosts the most-used controls inline so they're visible without opening the advanced panel: ferry/highway/toll icon buttons (a state-decorated `IconEnumButton` for each), a `DateTimeButton`, an alternates slider, and the directions language picker. Used by both the directions and isochrones tabs (the latter passes `showAlternates={false} showLanguage={false}`). Renders the `SettingsButton` ("Advanced settings") at the bottom — that's the entry point to `SettingsPanel`.
 - `src/components/settings-panel/` — full ("advanced") costing options panel. `settings-options.ts` holds `settingsInit`, `settingsInitTruckOverride`, the per-profile `profileSettings` / `generalSettings` lists, and the `languageOptions` / language storage helpers. `settings-panel.tsx` renders `Profile Settings` + `General Settings`, **filtering out** `use_highways`, `use_tolls`, `use_ferry`, `alternates` since those moved to QuickSettings (params still flow through `filter-profile-settings.ts` for API requests).
 - `src/components/ui/` — shadcn/ui primitives (do not rename — they're tracked by `components.json`). `icon-enum-setting.tsx` (`IconEnumButton`), `date-time-button.tsx`, and `calendar.tsx` are the QuickSettings building blocks.

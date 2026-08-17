@@ -9,6 +9,7 @@ const mockSetWaypointFromCoords = vi.fn().mockResolvedValue([]);
 const mockAddEmptyWaypointToEnd = vi.fn();
 const mockClearWaypoints = vi.fn();
 const mockClearRoutes = vi.fn();
+const mockSetActiveRoute = vi.fn();
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: vi.fn(() => mockNavigate),
@@ -23,40 +24,65 @@ const mockWaypoints = [
   { id: '1', geocodeResults: [], userInput: '' },
 ];
 
+interface MockRoute {
+  id?: string;
+  trip: { summary: unknown; legs: unknown[] };
+  alternates?: { id: string; trip: { summary: unknown; legs: unknown[] } }[];
+}
+
+const createMockRoute = (alternateIds: string[] = []): MockRoute => ({
+  id: 'main',
+  trip: { summary: {}, legs: [] },
+  ...(alternateIds.length > 0
+    ? {
+        alternates: alternateIds.map((id) => ({
+          id,
+          trip: { summary: {}, legs: [] },
+        })),
+      }
+    : {}),
+});
+
 const mockResults = {
-  data: null as null | {
-    trip: { summary: unknown; legs: unknown[] };
-    alternates?: unknown[];
-  },
-  show: { '0': true },
+  byProfile: [] as { profile: string; data: MockRoute }[],
+  show: {} as Record<string, boolean>,
 };
 
+let mockActiveRoute: { profile: string; index: number } | null = null;
+
 vi.mock('@/stores/directions-store', () => {
+  const state = () => ({
+    waypoints: mockWaypoints,
+    results: mockResults,
+    activeRoute: mockActiveRoute,
+    isOptimized: false,
+    addEmptyWaypointToEnd: mockAddEmptyWaypointToEnd,
+    clearWaypoints: mockClearWaypoints,
+    clearRoutes: mockClearRoutes,
+    setActiveRoute: mockSetActiveRoute,
+  });
+
   const useDirectionsStore = Object.assign(
-    vi.fn((selector) =>
-      selector({
-        waypoints: mockWaypoints,
-        results: mockResults,
-        addEmptyWaypointToEnd: mockAddEmptyWaypointToEnd,
-        clearWaypoints: mockClearWaypoints,
-        clearRoutes: mockClearRoutes,
-      })
-    ),
-    {
-      getState: () => ({
-        waypoints: mockWaypoints,
-        results: mockResults,
-        addEmptyWaypointToEnd: mockAddEmptyWaypointToEnd,
-        clearWaypoints: mockClearWaypoints,
-        clearRoutes: mockClearRoutes,
-      }),
-    }
+    vi.fn((selector) => selector(state())),
+    { getState: state }
   );
+
   return {
     defaultWaypoints: [
       { id: '0', geocodeResults: [], userInput: '' },
       { id: '1', geocodeResults: [], userInput: '' },
     ],
+    routeKey: (profile: string, index: number) => `${profile}:${index}`,
+    getRouteAt: (
+      byProfile: { profile: string; data: MockRoute }[],
+      { profile, index }: { profile: string; index: number }
+    ) => {
+      const entry = byProfile.find((route) => route.profile === profile);
+      if (!entry) return null;
+      return index === 0
+        ? entry.data
+        : (entry.data.alternates?.[index - 1] ?? null);
+    },
     useDirectionsStore,
   };
 });
@@ -94,9 +120,25 @@ vi.mock('@/components/quick-settings', () => ({
 }));
 
 vi.mock('./route-card', () => ({
-  RouteCard: ({ data, index }: { data: unknown; index: number }) => (
-    <div data-testid={`mock-route-card-${index}`}>
-      Route Card {index}: {JSON.stringify(data)}
+  RouteCard: ({
+    data,
+    profile,
+    index,
+    isActive,
+    onSelect,
+  }: {
+    data: unknown;
+    profile: string;
+    index: number;
+    isActive: boolean;
+    onSelect: () => void;
+  }) => (
+    <div
+      data-testid={`mock-route-card-${profile}-${index}`}
+      data-active={isActive}
+      onClick={onSelect}
+    >
+      Route Card {profile} {index}: {JSON.stringify(data)}
     </div>
   ),
 }));
@@ -104,7 +146,9 @@ vi.mock('./route-card', () => ({
 describe('DirectionsControl', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResults.data = null;
+    mockResults.byProfile = [];
+    mockResults.show = {};
+    mockActiveRoute = null;
     mockWaypoints.length = 0;
     mockWaypoints.push(
       { id: '0', geocodeResults: [], userInput: '' },
@@ -186,35 +230,114 @@ describe('DirectionsControl', () => {
 
   it('should not render RouteCard when no results', () => {
     render(<DirectionsControl />);
-    expect(screen.queryByTestId('mock-route-card-0')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('mock-route-card-car-0')
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Directions')).not.toBeInTheDocument();
   });
 
   it('should render RouteCard when results exist', () => {
-    mockResults.data = {
-      trip: { summary: {}, legs: [] },
-    };
+    mockResults.byProfile = [{ profile: 'car', data: createMockRoute() }];
 
     render(<DirectionsControl />);
 
     expect(screen.getByText('Directions')).toBeInTheDocument();
-    expect(screen.getByTestId('mock-route-card-0')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-route-card-car-0')).toBeInTheDocument();
   });
 
   it('should render alternate routes when available', () => {
-    mockResults.data = {
-      trip: { summary: {}, legs: [] },
-      alternates: [
-        { id: 'alt-1', trip: { summary: {}, legs: [] } },
-        { id: 'alt-2', trip: { summary: {}, legs: [] } },
-      ],
-    };
+    mockResults.byProfile = [
+      { profile: 'car', data: createMockRoute(['alt-1', 'alt-2']) },
+    ];
 
     render(<DirectionsControl />);
 
-    expect(screen.getByTestId('mock-route-card-0')).toBeInTheDocument();
-    expect(screen.getByTestId('mock-route-card-1')).toBeInTheDocument();
-    expect(screen.getByTestId('mock-route-card-2')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-route-card-car-0')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-route-card-car-1')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-route-card-car-2')).toBeInTheDocument();
+  });
+
+  it('should render one card per profile when several profiles routed', () => {
+    mockResults.byProfile = [
+      { profile: 'car', data: createMockRoute(['car-alt']) },
+      { profile: 'emergency', data: createMockRoute() },
+    ];
+
+    render(<DirectionsControl />);
+
+    expect(screen.getByTestId('mock-route-card-car-0')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-route-card-car-1')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('mock-route-card-emergency-0')
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('mock-route-card-emergency-1')
+    ).not.toBeInTheDocument();
+  });
+
+  it('should not render a profile group header for a single profile', () => {
+    mockResults.byProfile = [{ profile: 'car', data: createMockRoute() }];
+
+    render(<DirectionsControl />);
+
+    expect(screen.queryByText('Car')).not.toBeInTheDocument();
+  });
+
+  it('should render a profile group header per profile when several profiles routed', () => {
+    mockResults.byProfile = [
+      { profile: 'car', data: createMockRoute() },
+      { profile: 'emergency', data: createMockRoute() },
+    ];
+
+    render(<DirectionsControl />);
+
+    expect(screen.getByText('Car')).toBeInTheDocument();
+    expect(screen.getByText('Emergency')).toBeInTheDocument();
+  });
+
+  it('should mark only the active route as active', () => {
+    mockResults.byProfile = [
+      { profile: 'car', data: createMockRoute(['car-alt']) },
+      { profile: 'emergency', data: createMockRoute() },
+    ];
+    mockActiveRoute = { profile: 'emergency', index: 0 };
+
+    render(<DirectionsControl />);
+
+    expect(screen.getByTestId('mock-route-card-emergency-0')).toHaveAttribute(
+      'data-active',
+      'true'
+    );
+    expect(screen.getByTestId('mock-route-card-car-0')).toHaveAttribute(
+      'data-active',
+      'false'
+    );
+    expect(screen.getByTestId('mock-route-card-car-1')).toHaveAttribute(
+      'data-active',
+      'false'
+    );
+  });
+
+  it('should call setActiveRoute with profile and index when a card is selected', async () => {
+    const user = userEvent.setup();
+    mockResults.byProfile = [
+      { profile: 'car', data: createMockRoute(['car-alt']) },
+      { profile: 'emergency', data: createMockRoute() },
+    ];
+
+    render(<DirectionsControl />);
+
+    await user.click(screen.getByTestId('mock-route-card-car-1'));
+    expect(mockSetActiveRoute).toHaveBeenCalledWith({
+      profile: 'car',
+      index: 1,
+    });
+
+    await user.click(screen.getByTestId('mock-route-card-emergency-0'));
+    expect(mockSetActiveRoute).toHaveBeenCalledWith({
+      profile: 'emergency',
+      index: 0,
+    });
   });
 
   it('should sync waypoints to URL', () => {
@@ -256,7 +379,9 @@ describe('DirectionsControl', () => {
 describe('DirectionsControl URL parsing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResults.data = null;
+    mockResults.byProfile = [];
+    mockResults.show = {};
+    mockActiveRoute = null;
     mockWaypoints.length = 0;
     mockWaypoints.push(
       { id: '0', geocodeResults: [], userInput: '' },

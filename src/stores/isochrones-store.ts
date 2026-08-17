@@ -5,12 +5,21 @@ import type {
   ActiveWaypoint,
   ValhallaIsochroneResponse,
 } from '@/components/types';
+import type { Profile } from '@/stores/common-store';
 import type { PaletteId } from '@/utils/isochrone-palettes';
 import { DEFAULT_OPACITY } from '@/utils/isochrone-palettes';
 
-interface IsochroneResult {
-  data: ValhallaIsochroneResponse | null;
-  show: boolean;
+/** One Valhalla `/isochrone` response, tagged with the profile it came from. */
+export interface ProfileIsochroneResult {
+  profile: Profile;
+  data: ValhallaIsochroneResponse;
+}
+
+interface IsochroneResults {
+  /** One entry per selected profile that returned contours, in selection order. */
+  byProfile: ProfileIsochroneResult[];
+  /** Per-profile map visibility. */
+  show: Partial<Record<Profile, boolean>>;
 }
 
 interface IsochroneState {
@@ -22,14 +31,15 @@ interface IsochroneState {
   interval: number;
   denoise: number;
   generalize: number;
-  results: IsochroneResult;
+  results: IsochroneResults;
   colorPalette: PaletteId;
   opacity: number;
 }
 
 interface IsochroneActions {
   clearIsos: () => void;
-  toggleShowOnMap: (show: boolean) => void;
+  toggleShowOnMap: (params: { profile: Profile; show: boolean }) => void;
+  receiveIsochroneResults: (results: ProfileIsochroneResult[]) => void;
   updateTextInput: (params: {
     userInput: string;
     addressIndex?: number;
@@ -58,7 +68,7 @@ export const useIsochronesStore = create<IsochroneStore>()(
       interval: 10,
       denoise: 0.1,
       generalize: 0,
-      results: { data: null, show: true },
+      results: { byProfile: [], show: {} },
       colorPalette: 'default',
       opacity: DEFAULT_OPACITY,
 
@@ -69,19 +79,32 @@ export const useIsochronesStore = create<IsochroneStore>()(
             state.userInput = '';
             state.geocodeResults = [];
             state.selectedAddress = null;
-            state.results = { data: null, show: true };
+            state.results = { byProfile: [], show: {} };
           },
           undefined,
           'clearIsos'
         ),
 
-      toggleShowOnMap: (show) =>
+      toggleShowOnMap: ({ profile, show }) =>
         set(
           (state) => {
-            state.results.show = show;
+            state.results.show[profile] = show;
           },
           undefined,
           'toggleShowOnMap'
+        ),
+
+      receiveIsochroneResults: (results) =>
+        set(
+          (state) => {
+            const show: Partial<Record<Profile, boolean>> = {};
+            for (const { profile } of results) show[profile] = true;
+
+            state.successful = results.length > 0;
+            state.results = { byProfile: results, show };
+          },
+          undefined,
+          'receiveIsochroneResults'
         ),
 
       updateTextInput: ({ userInput, addressIndex }) =>

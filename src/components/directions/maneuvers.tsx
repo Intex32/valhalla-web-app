@@ -6,6 +6,7 @@ import { MetricItem } from '@/components/ui/metric-item';
 import { RouteAttributes } from '@/components/ui/route-attributes';
 import { formatDuration } from '@/utils/date-time';
 import { useDirectionsStore } from '@/stores/directions-store';
+import type { Profile } from '@/stores/common-store';
 import { getManeuverIcon } from '@/utils/get-maneuver-icon';
 
 const getLength = (length: number) => {
@@ -18,17 +19,18 @@ const getLength = (length: number) => {
 
 interface ManeuversProps {
   legs: Leg[];
+  profile: Profile;
   index: number;
 }
 
-export const Maneuvers = ({ legs, index }: ManeuversProps) => {
+export const Maneuvers = ({ legs, profile, index }: ManeuversProps) => {
   const highlightManeuver = useDirectionsStore(
     (state) => state.highlightManeuver
   );
   const zoomToManeuver = useDirectionsStore((state) => state.zoomToManeuver);
 
   const highlightMnv = (startIndex: number, endIndex: number) => {
-    highlightManeuver({ startIndex, endIndex, alternate: index });
+    highlightManeuver({ startIndex, endIndex, profile, index });
   };
 
   const zoomToMnv = (startIndex: number) => {

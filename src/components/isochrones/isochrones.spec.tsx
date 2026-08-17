@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { IsochronesControl } from './isochrones';
+import type { Profile } from '@/stores/common-store';
 
 const mockNavigate = vi.fn();
 const mockRefetchIsochrones = vi.fn();
@@ -23,11 +24,16 @@ vi.mock('@/utils/parse-url-params', () => ({
   parseUrlParams: vi.fn(() => ({})),
 }));
 
-const mockResults = {
-  data: null as null | {
-    features: { properties: { contour: number; area: number } }[];
-  },
-  show: true,
+interface MockIsochroneData {
+  features: { properties: { contour: number; area: number } }[];
+}
+
+const mockResults: {
+  byProfile: { profile: Profile; data: MockIsochroneData }[];
+  show: Partial<Record<Profile, boolean>>;
+} = {
+  byProfile: [],
+  show: {},
 };
 
 const mockGeocodeResults: {
@@ -75,13 +81,37 @@ vi.mock('@/components/settings-footer', () => ({
 vi.mock('./isochrone-card', () => ({
   IsochroneCard: ({
     data,
+    profile,
     showOnMap,
+    showProfileLabel,
   }: {
     data: unknown;
+    profile: string;
     showOnMap: boolean;
+    showProfileLabel: boolean;
   }) => (
-    <div data-testid="mock-isochrone-card" data-show-on-map={showOnMap}>
+    <div
+      data-testid="mock-isochrone-card"
+      data-profile={profile}
+      data-show-on-map={showOnMap}
+      data-show-profile-label={showProfileLabel}
+    >
       Isochrone Card: {JSON.stringify(data)}
+    </div>
+  ),
+}));
+
+vi.mock('./isochrone-visualization', () => ({
+  IsochroneVisualization: ({
+    multipleProfiles,
+  }: {
+    multipleProfiles: boolean;
+  }) => (
+    <div
+      data-testid="mock-isochrone-visualization"
+      data-multiple-profiles={multipleProfiles}
+    >
+      Isochrone Visualization
     </div>
   ),
 }));
@@ -92,10 +122,16 @@ vi.mock('@/components/quick-settings', () => ({
   ),
 }));
 
+const isochroneResult = (profile: Profile, contour: number, area: number) => ({
+  profile,
+  data: { features: [{ properties: { contour, area } }] },
+});
+
 describe('IsochronesControl', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResults.data = null;
+    mockResults.byProfile = [];
+    mockResults.show = {};
     mockGeocodeResults.length = 0;
   });
 
@@ -119,10 +155,15 @@ describe('IsochronesControl', () => {
     expect(screen.queryByText('Isochrones')).not.toBeInTheDocument();
   });
 
+  it('should not render IsochroneVisualization when no results', () => {
+    render(<IsochronesControl />);
+    expect(
+      screen.queryByTestId('mock-isochrone-visualization')
+    ).not.toBeInTheDocument();
+  });
+
   it('should render IsochroneCard when results exist', () => {
-    mockResults.data = {
-      features: [{ properties: { contour: 10, area: 5.5 } }],
-    };
+    mockResults.byProfile = [isochroneResult('car', 10, 5.5)];
 
     render(<IsochronesControl />);
 
@@ -130,16 +171,93 @@ describe('IsochronesControl', () => {
     expect(screen.getByTestId('mock-isochrone-card')).toBeInTheDocument();
   });
 
-  it('should pass correct props to IsochroneCard', () => {
-    mockResults.data = {
-      features: [{ properties: { contour: 15, area: 8.2 } }],
-    };
-    mockResults.show = false;
+  it('should render IsochroneVisualization when results exist', () => {
+    mockResults.byProfile = [isochroneResult('car', 10, 5.5)];
 
     render(<IsochronesControl />);
 
-    const card = screen.getByTestId('mock-isochrone-card');
-    expect(card).toHaveAttribute('data-show-on-map', 'false');
+    const visualization = screen.getByTestId('mock-isochrone-visualization');
+    expect(visualization).toBeInTheDocument();
+    expect(visualization).toHaveAttribute('data-multiple-profiles', 'false');
+  });
+
+  it('should render one IsochroneCard per profile', () => {
+    mockResults.byProfile = [
+      isochroneResult('car', 10, 5.5),
+      isochroneResult('emergency', 10, 7.25),
+    ];
+
+    render(<IsochronesControl />);
+
+    const cards = screen.getAllByTestId('mock-isochrone-card');
+    expect(cards).toHaveLength(2);
+    expect(cards.map((card) => card.getAttribute('data-profile'))).toEqual([
+      'car',
+      'emergency',
+    ]);
+  });
+
+  it('should tell IsochroneVisualization when several profiles are shown', () => {
+    mockResults.byProfile = [
+      isochroneResult('car', 10, 5.5),
+      isochroneResult('emergency', 10, 7.25),
+    ];
+
+    render(<IsochronesControl />);
+
+    expect(screen.getByTestId('mock-isochrone-visualization')).toHaveAttribute(
+      'data-multiple-profiles',
+      'true'
+    );
+  });
+
+  it('should only label profiles on the cards when several profiles are shown', () => {
+    mockResults.byProfile = [isochroneResult('car', 10, 5.5)];
+
+    const { unmount } = render(<IsochronesControl />);
+    expect(screen.getByTestId('mock-isochrone-card')).toHaveAttribute(
+      'data-show-profile-label',
+      'false'
+    );
+    unmount();
+
+    mockResults.byProfile = [
+      isochroneResult('car', 10, 5.5),
+      isochroneResult('bicycle', 10, 1.5),
+    ];
+
+    render(<IsochronesControl />);
+    for (const card of screen.getAllByTestId('mock-isochrone-card')) {
+      expect(card).toHaveAttribute('data-show-profile-label', 'true');
+    }
+  });
+
+  it('should pass the per-profile visibility flag to IsochroneCard', () => {
+    mockResults.byProfile = [
+      isochroneResult('car', 15, 8.2),
+      isochroneResult('emergency', 15, 9.4),
+    ];
+    mockResults.show = { car: false, emergency: true };
+
+    render(<IsochronesControl />);
+
+    const [carCard, emergencyCard] = screen.getAllByTestId(
+      'mock-isochrone-card'
+    );
+    expect(carCard).toHaveAttribute('data-show-on-map', 'false');
+    expect(emergencyCard).toHaveAttribute('data-show-on-map', 'true');
+  });
+
+  it('should default a profile to visible when it has no visibility flag', () => {
+    mockResults.byProfile = [isochroneResult('car', 15, 8.2)];
+    mockResults.show = {};
+
+    render(<IsochronesControl />);
+
+    expect(screen.getByTestId('mock-isochrone-card')).toHaveAttribute(
+      'data-show-on-map',
+      'true'
+    );
   });
 
   it('should sync geocode results to URL', () => {
@@ -196,7 +314,8 @@ describe('IsochronesControl', () => {
 describe('IsochronesControl URL parsing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResults.data = null;
+    mockResults.byProfile = [];
+    mockResults.show = {};
     mockGeocodeResults.length = 0;
   });
 

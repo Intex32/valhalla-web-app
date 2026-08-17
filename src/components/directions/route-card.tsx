@@ -5,6 +5,8 @@ import { Summary } from './summary';
 import { Maneuvers } from './maneuvers';
 import { Button } from '@/components/ui/button';
 import type { ParsedDirectionsGeometry } from '@/components/types';
+import type { Profile } from '@/stores/common-store';
+import { getRouteColor } from '@/utils/profile-colors';
 import {
   Collapsible,
   CollapsibleContent,
@@ -24,6 +26,7 @@ import { getDateTimeString } from '@/utils/date-time';
 
 interface RouteCardProps {
   data: ParsedDirectionsGeometry;
+  profile: Profile;
   index: number;
   isActive: boolean;
   onSelect: () => void;
@@ -31,6 +34,7 @@ interface RouteCardProps {
 
 export const RouteCard = ({
   data,
+  profile,
   index,
   isActive,
   onSelect,
@@ -71,8 +75,14 @@ export const RouteCard = ({
           'flex flex-col gap-2.5 border rounded-md p-2 cursor-pointer transition-colors',
           'focus-within:bg-muted/50 hover:bg-muted/50',
           showManeuvers ? 'bg-muted/50' : 'bg-background',
-          isActive && 'border-l-4 border-l-primary'
+          isActive && 'border-l-4'
         )}
+        // The left edge carries the same colour the route has on the map.
+        style={
+          isActive
+            ? { borderLeftColor: getRouteColor(profile, index) }
+            : undefined
+        }
         onClick={onSelect}
         tabIndex={0}
         onKeyDown={(e) => {
@@ -85,6 +95,7 @@ export const RouteCard = ({
         <Summary
           title={`${index === 0 ? 'Main Route' : 'Alternate Route #' + index}`}
           summary={data.trip.summary}
+          profile={profile}
           index={index}
           routeCoordinates={data.decodedGeometry ?? []}
         />
@@ -116,7 +127,7 @@ export const RouteCard = ({
           </div>
           <CollapsibleContent>
             <Separator className="my-2" />
-            <Maneuvers legs={data.trip.legs} index={index} />
+            <Maneuvers legs={data.trip.legs} profile={profile} index={index} />
           </CollapsibleContent>
         </Collapsible>
       </div>
