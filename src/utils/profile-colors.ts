@@ -41,3 +41,48 @@ export const getProfileContourColor = (profile: Profile, t: number): string => {
   const darkest = interpolateHex(base, '#000000', 0.25);
   return interpolateHex(lightest, darkest, Math.min(1, Math.max(0, t)));
 };
+
+/**
+ * Colour for a (instance, profile) target. The profile keeps its hue on every
+ * server — car stays blue — while each instance shifts the shade, so the same
+ * profile from two servers is still telling apart at a glance. Instance 0 gets
+ * the untouched profile colour.
+ */
+export const getTargetColor = (
+  instanceIndex: number,
+  profile: Profile
+): string => {
+  const base = PROFILE_COLORS[profile];
+  if (instanceIndex <= 0) return base;
+
+  // Alternate darker / lighter so neighbouring instances never collide.
+  const towards = instanceIndex % 2 === 1 ? '#000000' : '#ffffff';
+  const amount = Math.min(
+    0.6,
+    0.32 + 0.14 * Math.floor((instanceIndex - 1) / 2)
+  );
+  return interpolateHex(base, towards, amount);
+};
+
+/** Alternates fade towards white, keeping their target's shade recognisable. */
+export const getTargetRouteColor = (
+  instanceIndex: number,
+  profile: Profile,
+  routeIndex: number
+): string => {
+  const base = getTargetColor(instanceIndex, profile);
+  if (routeIndex <= 0) return base;
+  return interpolateHex(base, '#ffffff', Math.min(0.5, 0.18 * routeIndex));
+};
+
+/** Contour shading for one target's isochrones: near light, far saturated. */
+export const getTargetContourColor = (
+  instanceIndex: number,
+  profile: Profile,
+  t: number
+): string => {
+  const base = getTargetColor(instanceIndex, profile);
+  const lightest = interpolateHex(base, '#ffffff', 0.7);
+  const darkest = interpolateHex(base, '#000000', 0.25);
+  return interpolateHex(lightest, darkest, Math.min(1, Math.max(0, t)));
+};

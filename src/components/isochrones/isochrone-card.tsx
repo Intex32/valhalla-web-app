@@ -1,6 +1,8 @@
 import { cn } from '@/lib/utils';
 import type { ValhallaIsochroneResponse } from '@/components/types';
-import type { Profile } from '@/stores/common-store';
+import type { TargetRef } from '@/utils/targets';
+import { targetKey } from '@/utils/targets';
+import { useInstancesStore, instanceIndex } from '@/stores/instances-store';
 import { ClockIcon, MoveIcon } from 'lucide-react';
 import { exportDataAsJson } from '@/utils/export';
 
@@ -16,27 +18,34 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { MetricItem } from '@/components/ui/metric-item';
-import { getProfileColor } from '@/utils/profile-colors';
+import { getTargetColor } from '@/utils/profile-colors';
 import { getProfileLabel } from '@/utils/profiles';
 
 interface IsochronesCardProps {
   data: ValhallaIsochroneResponse;
-  profile: Profile;
+  target: TargetRef;
   showOnMap: boolean;
-  /** Whether more than one profile is on screen — drives the colour key. */
+  /** Whether more than one target is on screen — drives the colour key. */
   showProfileLabel: boolean;
 }
 
 export const IsochroneCard = ({
   data,
-  profile,
+  target,
   showOnMap,
   showProfileLabel,
 }: IsochronesCardProps) => {
   const toggleShowOnMap = useIsochronesStore((state) => state.toggleShowOnMap);
+  const instances = useInstancesStore((state) => state.instances);
+  const profile = target.profile;
+  const key = targetKey(target);
+  const color = getTargetColor(
+    instanceIndex(instances, target.instanceId),
+    profile
+  );
 
   const handleChange = (checked: boolean) => {
-    toggleShowOnMap({ profile, show: checked });
+    toggleShowOnMap({ target, show: checked });
   };
 
   return (
@@ -45,7 +54,7 @@ export const IsochroneCard = ({
         'flex flex-col gap-2.5 border rounded-md p-2',
         'focus-within:bg-muted/50 hover:bg-muted/50'
       )}
-      data-testid={`isochrone-card-${profile}`}
+      data-testid={`isochrone-card-${key}`}
     >
       {data.features?.length > 0 ? (
         <>
@@ -55,18 +64,18 @@ export const IsochroneCard = ({
                 <span
                   aria-hidden
                   className="size-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: getProfileColor(profile) }}
+                  style={{ backgroundColor: color }}
                 />
               )}
               {showProfileLabel ? getProfileLabel(profile) : 'Main Isochrone'}
             </span>
             <div className="flex items-center justify-end space-x-2">
               <Switch
-                id={`show-on-map-${profile}`}
+                id={`show-on-map-${key}`}
                 checked={showOnMap}
                 onCheckedChange={handleChange}
               />
-              <Label htmlFor={`show-on-map-${profile}`}>Show on map</Label>
+              <Label htmlFor={`show-on-map-${key}`}>Show on map</Label>
             </div>
           </div>
           <div className="flex flex-col justify-between gap-2">
@@ -104,7 +113,7 @@ export const IsochroneCard = ({
               <DropdownMenuContent>
                 <DropdownMenuItem
                   onClick={() =>
-                    exportDataAsJson(data, `valhalla-isochrones-${profile}`)
+                    exportDataAsJson(data, `valhalla-isochrones-${key}`)
                   }
                 >
                   JSON

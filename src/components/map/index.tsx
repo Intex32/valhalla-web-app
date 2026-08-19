@@ -16,7 +16,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 
 import { throttle } from 'throttle-debounce';
 import {
-  getValhallaUrl,
+  getInstanceUrl,
   buildHeightRequest,
   VALHALLA_CLIENT_HEADERS,
 } from '@/utils/valhalla';
@@ -62,6 +62,7 @@ import { getInitialMapPosition, LAST_CENTER_KEY } from './utils';
 import { useCommonStore, type Profile } from '@/stores/common-store';
 import { useDirectionsStore, getRouteAt } from '@/stores/directions-store';
 import { isValidProfile } from '@/components/utils';
+import { usePrimaryTarget } from '@/hooks/use-selected-targets';
 import { useIsochronesStore } from '@/stores/isochrones-store';
 import {
   useDirectionsQuery,
@@ -95,7 +96,10 @@ export const MapComponent = () => {
     (state) => state.directionsPanelOpen
   );
   const toggleDirections = useCommonStore((state) => state.toggleDirections);
-  const updateSettings = useCommonStore((state) => state.updateSharedSetting);
+  const setExcludePolygons = useCommonStore(
+    (state) => state.setExcludePolygons
+  );
+  const primaryTarget = usePrimaryTarget();
   const setMapReady = useCommonStore((state) => state.setMapReady);
   const { style } = useSearch({ from: '/$activeTab' });
   const [showInfoPopup, setShowInfoPopup] = useState(false);
@@ -235,14 +239,14 @@ export const MapComponent = () => {
       }
     });
 
-    updateSettings('exclude_polygons', excludePolygons as unknown as string);
+    setExcludePolygons(excludePolygons as unknown as GeoJSON.GeoJSON[]);
 
     if (activeTab === 'directions') {
       refetchDirections();
     } else {
       refetchIsochrones();
     }
-  }, [activeTab, refetchDirections, updateSettings, refetchIsochrones]);
+  }, [activeTab, refetchDirections, setExcludePolygons, refetchIsochrones]);
 
   const updateWaypointPosition = useCallback(
     (object: { latLng: { lat: number; lng: number }; index: number }) => {
@@ -284,34 +288,47 @@ export const MapComponent = () => {
     [directionsPanelOpen, toggleDirections, navigate]
   );
 
-  const getHeight = useCallback(async (lng: number, lat: number) => {
-    setIsHeightLoading(true);
+  // Elevation is read from whichever server owns the line being asked about:
+  // the active route's instance, falling back to the primary target for a bare
+  // map click. `primaryTarget` must stay in the deps or the callback keeps
+  // querying whatever instance was primary on first render.
+  const elevationInstanceId =
+    activeRoute?.instanceId ?? primaryTarget.instanceId;
 
-    try {
-      const response = await fetch(`${getValhallaUrl()}/height`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...VALHALLA_CLIENT_HEADERS,
-        },
-        body: JSON.stringify(buildHeightRequest([[lat, lng]])),
-      });
+  const getHeight = useCallback(
+    async (lng: number, lat: number) => {
+      setIsHeightLoading(true);
 
-      if (!response.ok) {
-        throw new Error('Could not fetch resource');
+      try {
+        const response = await fetch(
+          `${getInstanceUrl(elevationInstanceId)}/height`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...VALHALLA_CLIENT_HEADERS,
+            },
+            body: JSON.stringify(buildHeightRequest([[lat, lng]])),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Could not fetch resource');
+        }
+
+        const data = await response.json();
+
+        if ('height' in data) {
+          setElevation(data.height[0] + ' m');
+        }
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setIsHeightLoading(false);
       }
-
-      const data = await response.json();
-
-      if ('height' in data) {
-        setElevation(data.height[0] + ' m');
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsHeightLoading(false);
-    }
-  }, []);
+    },
+    [elevationInstanceId]
+  );
 
   const handleAddWaypoint = useCallback(
     (index: number) => {
@@ -335,7 +352,7 @@ export const MapComponent = () => {
   const getHeightData = useCallback(async () => {
     // The elevation profile describes one line — use whichever route is active.
     const activeGeometry = activeRoute
-      ? getRouteAt(directionResults.byProfile, activeRoute)?.decodedGeometry
+      ? getRouteAt(directionResults.byTarget, activeRoute)?.decodedGeometry
       : undefined;
     if (!activeGeometry) return;
 
@@ -348,14 +365,17 @@ export const MapComponent = () => {
       setHeightPayload(heightPayloadNew);
 
       try {
-        const response = await fetch(`${getValhallaUrl()}/height`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...VALHALLA_CLIENT_HEADERS,
-          },
-          body: JSON.stringify(heightPayloadNew),
-        });
+        const response = await fetch(
+          `${getInstanceUrl(elevationInstanceId)}/height`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...VALHALLA_CLIENT_HEADERS,
+            },
+            body: JSON.stringify(heightPayloadNew),
+          }
+        );
 
         if (!response.ok) {
           throw new Error('Could not fetch resource');
@@ -384,7 +404,13 @@ export const MapComponent = () => {
         setIsHeightLoading(false);
       }
     }
-  }, [directionResults, activeRoute, heightPayload, updateInclineDecline]);
+  }, [
+    directionResults,
+    activeRoute,
+    elevationInstanceId,
+    heightPayload,
+    updateInclineDecline,
+  ]);
 
   // Update markers when waypoints or isochrone centers change
   const geocodeResults = useIsochronesStore((state) => state.geocodeResults);
@@ -587,9 +613,11 @@ export const MapComponent = () => {
       if (
         routeFeature &&
         typeof routeFeature.properties?.routeIndex === 'number' &&
-        isValidProfile(String(routeFeature.properties.profile))
+        isValidProfile(String(routeFeature.properties.profile)) &&
+        typeof routeFeature.properties.instanceId === 'string'
       ) {
         setActiveRoute({
+          instanceId: routeFeature.properties.instanceId,
           profile: routeFeature.properties.profile as Profile,
           index: routeFeature.properties.routeIndex,
         });

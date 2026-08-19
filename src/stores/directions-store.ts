@@ -2,7 +2,8 @@ import type {
   ActiveWaypoint,
   ParsedDirectionsGeometry,
 } from '@/components/types';
-import type { Profile } from '@/stores/common-store';
+
+import { targetKey, sameTarget, type TargetRef } from '@/utils/targets';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
@@ -14,11 +15,10 @@ export interface Waypoint {
 }
 
 /**
- * A single route within a profile's response: 0 is the main route, 1..n are
+ * A single route within a target's response: 0 is the main route, 1..n are
  * that response's alternates.
  */
-export interface RouteRef {
-  profile: Profile;
+export interface RouteRef extends TargetRef {
   index: number;
 }
 
@@ -32,32 +32,45 @@ interface ZoomObj {
   timeNow: number;
 }
 
-/** One Valhalla `/route` response, tagged with the profile that produced it. */
-export interface ProfileRouteResult {
-  profile: Profile;
+/** One Valhalla `/route` response, tagged with the target that produced it. */
+export interface TargetRouteResult {
+  target: TargetRef;
   data: ParsedDirectionsGeometry;
 }
 
+/** Why a selected target produced no route. */
+export interface TargetFailure {
+  target: TargetRef;
+  /** `unsupported` means the server has no such costing model (error_code 125). */
+  kind: 'unsupported' | 'error';
+  message: string;
+}
+
 interface RouteResults {
-  /** One entry per selected profile that returned a route, in selection order. */
-  byProfile: ProfileRouteResult[];
+  /** One entry per target that returned a route, in selection order. */
+  byTarget: TargetRouteResult[];
+  /** Targets that returned nothing, so the panel can explain the gap. */
+  failures: TargetFailure[];
   /** Per-route map visibility, keyed by {@link routeKey}. */
   show: Record<string, boolean>;
 }
 
-export const routeKey = (profile: Profile, index: number): string =>
-  `${profile}:${index}`;
+export const routeKey = (target: TargetRef, index: number): string =>
+  `${targetKey(target)}__${index.toString()}`;
 
-/** The n-th route of a profile's response — index 0 is the main route. */
+/** The n-th route of a target's response — index 0 is the main route. */
 export const getRouteAt = (
-  results: ProfileRouteResult[],
-  { profile, index }: RouteRef
+  results: TargetRouteResult[],
+  ref: RouteRef
 ): ParsedDirectionsGeometry | null => {
-  const entry = results.find((result) => result.profile === profile);
+  // Must match BOTH instance and profile: two servers routing the same profile
+  // are different results, and matching on profile alone silently picks the
+  // first server's line.
+  const entry = results.find((result) => sameTarget(result.target, ref));
   if (!entry) return null;
-  if (index === 0) return entry.data;
+  if (ref.index === 0) return entry.data;
   return (
-    (entry.data.alternates?.[index - 1] as ParsedDirectionsGeometry) ?? null
+    (entry.data.alternates?.[ref.index - 1] as ParsedDirectionsGeometry) ?? null
   );
 };
 
@@ -94,7 +107,7 @@ const hasActiveRoute = (waypoints: Waypoint[]): boolean =>
 
 export interface DirectionsState {
   successful: boolean;
-  highlightSegment: HighlightSegment;
+  highlightSegment: HighlightSegment | null;
   waypoints: Waypoint[];
   zoomObj: ZoomObj;
   selectedAddresses: string | (Waypoint | null)[];
@@ -109,7 +122,10 @@ interface DirectionsActions {
   updateInclineDecline: (inclineDeclineTotal: InclineDeclineTotal) => void;
   toggleShowOnMap: (params: RouteRef & { show: boolean }) => void;
   clearRoutes: () => void;
-  receiveRouteResults: (params: { results: ProfileRouteResult[] }) => void;
+  receiveRouteResults: (params: {
+    results: TargetRouteResult[];
+    failures?: TargetFailure[];
+  }) => void;
   receiveGeocodeResults: (params: {
     index: number;
     addresses: ActiveWaypoint[];
@@ -142,16 +158,11 @@ export const useDirectionsStore = create<DirectionsStore>()(
   devtools(
     immer((set) => ({
       successful: false,
-      highlightSegment: {
-        startIndex: -1,
-        endIndex: -1,
-        index: -1,
-        profile: 'bicycle',
-      },
+      highlightSegment: null,
       waypoints: defaultWaypoints,
       zoomObj: { index: -1, timeNow: -1 },
       selectedAddresses: '',
-      results: { byProfile: [], show: {} },
+      results: { byTarget: [], failures: [], show: {} },
       isOptimized: false,
       activeRoute: null,
 
@@ -164,10 +175,10 @@ export const useDirectionsStore = create<DirectionsStore>()(
           'updateInclineDecline'
         ),
 
-      toggleShowOnMap: ({ profile, index, show }) =>
+      toggleShowOnMap: ({ instanceId, profile, index, show }) =>
         set(
           (state) => {
-            state.results.show[routeKey(profile, index)] = show;
+            state.results.show[routeKey({ instanceId, profile }, index)] = show;
           },
           undefined,
           'toggleShowOnMap'
@@ -178,21 +189,21 @@ export const useDirectionsStore = create<DirectionsStore>()(
           (state) => {
             state.successful = false;
             state.inclineDeclineTotal = undefined;
-            state.results = { byProfile: [], show: {} };
+            state.results = { byTarget: [], failures: [], show: {} };
             state.activeRoute = null;
           },
           undefined,
           'clearRoutes'
         ),
 
-      receiveRouteResults: ({ results }) =>
+      receiveRouteResults: ({ results, failures = [] }) =>
         set(
           (state) => {
             const show: Record<string, boolean> = {};
-            for (const { profile, data } of results) {
-              show[routeKey(profile, 0)] = true;
+            for (const { target, data } of results) {
+              show[routeKey(target, 0)] = true;
               data.alternates?.forEach((_, i) => {
-                show[routeKey(profile, i + 1)] = true;
+                show[routeKey(target, i + 1)] = true;
               });
             }
 
@@ -200,10 +211,8 @@ export const useDirectionsStore = create<DirectionsStore>()(
 
             state.successful = results.length > 0;
             state.inclineDeclineTotal = undefined;
-            state.results = { byProfile: results, show };
-            state.activeRoute = first
-              ? { profile: first.profile, index: 0 }
-              : null;
+            state.results = { byTarget: results, failures, show };
+            state.activeRoute = first ? { ...first.target, index: 0 } : null;
           },
           undefined,
           'receiveRouteResults'
@@ -330,7 +339,7 @@ export const useDirectionsStore = create<DirectionsStore>()(
             if (!hasActiveRoute(state.waypoints)) {
               state.successful = false;
               state.inclineDeclineTotal = undefined;
-              state.results = { byProfile: [], show: {} };
+              state.results = { byTarget: [], failures: [], show: {} };
               state.activeRoute = null;
             }
           },
@@ -341,13 +350,11 @@ export const useDirectionsStore = create<DirectionsStore>()(
       highlightManeuver: (fromTo) =>
         set(
           (state) => {
-            const { startIndex, endIndex } = state.highlightSegment;
             const isToggleOff =
-              startIndex === fromTo.startIndex && endIndex === fromTo.endIndex;
+              state.highlightSegment?.startIndex === fromTo.startIndex &&
+              state.highlightSegment.endIndex === fromTo.endIndex;
 
-            state.highlightSegment = isToggleOff
-              ? { ...fromTo, startIndex: -1, endIndex: -1 }
-              : fromTo;
+            state.highlightSegment = isToggleOff ? null : fromTo;
           },
           undefined,
           'highlightManeuver'

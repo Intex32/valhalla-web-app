@@ -10,6 +10,8 @@ import {
 interface SettingRowProps {
   param: string;
   label: string;
+  /** Scopes the test id so two targets' rows stay distinguishable. */
+  idPrefix?: string;
   /** Whether this option is part of the request at all. */
   included: boolean;
   onIncludedChange: (included: boolean) => void;
@@ -24,6 +26,7 @@ interface SettingRowProps {
 export const SettingRow = ({
   param,
   label,
+  idPrefix,
   included,
   onIncludedChange,
   children,
@@ -35,7 +38,9 @@ export const SettingRow = ({
           checked={included}
           onCheckedChange={(checked) => onIncludedChange(checked === true)}
           aria-label={`Send ${label} to Valhalla`}
-          data-testid={`include-${param}`}
+          data-testid={
+            idPrefix ? `include-${idPrefix}-${param}` : `include-${param}`
+          }
           className="mt-2"
         />
       </TooltipTrigger>

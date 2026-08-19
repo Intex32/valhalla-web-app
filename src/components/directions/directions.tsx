@@ -13,9 +13,12 @@ import { parseUrlParams } from '@/utils/parse-url-params';
 import { isValidCoordinates } from '@/utils/geom';
 import { useNavigate } from '@tanstack/react-router';
 import { useDirectionsStore } from '@/stores/directions-store';
-import type { Profile } from '@/stores/common-store';
-import { getProfileColor } from '@/utils/profile-colors';
+import { useInstancesStore, instanceIndex } from '@/stores/instances-store';
+import { getTargetColor } from '@/utils/profile-colors';
 import { getProfileLabel } from '@/utils/profiles';
+import { sameTarget, targetKey, type TargetRef } from '@/utils/targets';
+import { InstanceResultsGroup } from '@/components/instance-results-group';
+import { ExportWaypointsButton } from './export-waypoints-button';
 import {
   useDirectionsQuery,
   useSetWaypointFromCoords,
@@ -46,8 +49,25 @@ export const DirectionsControl = () => {
   const activeRoute = useDirectionsStore((state) => state.activeRoute);
   const setActiveRoute = useDirectionsStore((state) => state.setActiveRoute);
 
-  const isActiveRoute = (profile: Profile, index: number) =>
-    activeRoute?.profile === profile && activeRoute.index === index;
+  const instances = useInstancesStore((state) => state.instances);
+
+  const isActiveRoute = (target: TargetRef, index: number) =>
+    activeRoute !== null &&
+    sameTarget(activeRoute, target) &&
+    activeRoute.index === index;
+
+  // Group by instance in list order, so the panel reads server by server.
+  const instanceGroups = instances
+    .map((instance) => ({
+      instance,
+      entries: results.byTarget.filter(
+        (entry) => entry.target.instanceId === instance.id
+      ),
+      failures: results.failures.filter(
+        (failure) => failure.target.instanceId === instance.id
+      ),
+    }))
+    .filter((group) => group.entries.length > 0 || group.failures.length > 0);
 
   useEffect(() => {
     if (urlParamsProcessed.current) return;
@@ -141,6 +161,7 @@ export const DirectionsControl = () => {
             Reset Waypoints
           </Button>
         </div>
+        <ExportWaypointsButton />
         <Tooltip open={activeWaypointsCount >= 4 ? false : undefined}>
           <TooltipTrigger asChild>
             <span>
@@ -164,44 +185,55 @@ export const DirectionsControl = () => {
       </div>
       <QuickSettings />
       <SettingsFooter />
-      {results.byProfile.length > 0 && (
+      {instanceGroups.length > 0 && (
         <div>
           <h3 className="font-bold mb-2">Directions</h3>
           <div className="flex flex-col gap-4">
-            {results.byProfile.map(({ profile, data }) => (
-              <div key={profile} className="flex flex-col gap-2">
-                {results.byProfile.length > 1 && (
-                  <div className="flex items-center gap-2">
-                    <span
-                      aria-hidden
-                      className="size-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: getProfileColor(profile) }}
+            {instanceGroups.map(({ instance, entries, failures }) => (
+              <InstanceResultsGroup
+                key={instance.id}
+                instanceId={instance.id}
+                failures={failures}
+              >
+                {entries.map(({ target, data }) => (
+                  <div key={targetKey(target)} className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="size-3 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: getTargetColor(
+                            instanceIndex(instances, target.instanceId),
+                            target.profile
+                          ),
+                        }}
+                      />
+                      <span className="text-sm font-semibold">
+                        {getProfileLabel(target.profile)}
+                      </span>
+                    </div>
+                    <RouteCard
+                      data={data}
+                      target={target}
+                      index={0}
+                      isActive={isActiveRoute(target, 0)}
+                      onSelect={() => setActiveRoute({ ...target, index: 0 })}
                     />
-                    <span className="text-sm font-semibold">
-                      {getProfileLabel(profile)}
-                    </span>
+                    {data.alternates?.map((alternate, index) => (
+                      <RouteCard
+                        data={alternate as ParsedDirectionsGeometry}
+                        key={`${targetKey(target)}__${(index + 1).toString()}`}
+                        target={target}
+                        index={index + 1}
+                        isActive={isActiveRoute(target, index + 1)}
+                        onSelect={() =>
+                          setActiveRoute({ ...target, index: index + 1 })
+                        }
+                      />
+                    ))}
                   </div>
-                )}
-                <RouteCard
-                  data={data}
-                  profile={profile}
-                  index={0}
-                  isActive={isActiveRoute(profile, 0)}
-                  onSelect={() => setActiveRoute({ profile, index: 0 })}
-                />
-                {data.alternates?.map((alternate, index) => (
-                  <RouteCard
-                    data={alternate as ParsedDirectionsGeometry}
-                    key={alternate.id}
-                    profile={profile}
-                    index={index + 1}
-                    isActive={isActiveRoute(profile, index + 1)}
-                    onSelect={() =>
-                      setActiveRoute({ profile, index: index + 1 })
-                    }
-                  />
                 ))}
-              </div>
+              </InstanceResultsGroup>
             ))}
           </div>
         </div>

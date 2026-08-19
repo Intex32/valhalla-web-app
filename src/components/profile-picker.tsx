@@ -16,9 +16,11 @@ import {
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 import { useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
-import { useSelectedProfiles } from '@/hooks/use-selected-profiles';
-import { getProfileColor } from '@/utils/profile-colors';
+import { useSelectedTargets } from '@/hooks/use-selected-targets';
+import { useInstancesStore, instanceIndex } from '@/stores/instances-store';
+import { getTargetColor } from '@/utils/profile-colors';
 import { getProfileLabel } from '@/utils/profiles';
+import { targetKey, type TargetRef } from '@/utils/targets';
 
 const iconMap = {
   truck: <TruckSvg className="size-7" />,
@@ -44,82 +46,127 @@ const profiles: Profile[] = [
 
 interface ProfilePickerProps {
   loading: boolean;
-  onProfileChange: (value: Profile[]) => void;
+  onTargetsChange: (value: TargetRef[]) => void;
 }
 
+/**
+ * One row of profiles per Valhalla instance. Picking `car` on two servers makes
+ * two independent targets, which is what lets the same profile be compared
+ * across builds.
+ */
 export const ProfilePicker = ({
   loading,
-  onProfileChange,
+  onTargetsChange,
 }: ProfilePickerProps) => {
-  const selectedProfiles = useSelectedProfiles();
+  const selectedTargets = useSelectedTargets();
+  const instances = useInstancesStore((state) => state.instances);
 
-  const handleUpdateProfiles = useCallback(
-    (next: Profile[]) => {
-      // At least one profile has to stay selected — deselecting the last one
-      // would leave nothing to route with.
-      if (next.length === 0) return;
+  const handleInstanceChange = useCallback(
+    (instanceId: string, nextProfiles: Profile[]) => {
+      const others = selectedTargets.filter(
+        (target) => target.instanceId !== instanceId
+      );
+      const next = nextProfiles.map((profile) => ({ instanceId, profile }));
 
-      // Each profile keeps its own costing options, so changing the selection
-      // never has to discard anything the user has tuned.
-      onProfileChange(next);
+      // At least one target overall has to stay selected — clearing every
+      // instance would leave nothing to route with.
+      if (others.length === 0 && next.length === 0) return;
+
+      // Rebuild in instance-list order so the URL and the panels stay stable.
+      const merged = instances.flatMap((instance) =>
+        instance.id === instanceId
+          ? next
+          : others.filter((target) => target.instanceId === instance.id)
+      );
+      onTargetsChange(merged);
     },
-    [onProfileChange]
+    [selectedTargets, instances, onTargetsChange]
   );
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       <TooltipProvider>
-        <ToggleGroup
-          type="multiple"
-          variant="outline"
-          size="lg"
-          value={selectedProfiles}
-          className="[&_button]:h-12 [&_button]:min-w-11 [&_button]:px-1"
-          onValueChange={(value: string[]) => {
-            // Radix hands back the raw set; re-order it so the list keeps the
-            // picker's left-to-right order and stays stable in the URL.
-            handleUpdateProfiles(profiles.filter((p) => value.includes(p)));
-          }}
-        >
-          {profiles.map((profile) => {
-            const isSelected = selectedProfiles.includes(profile);
-            const label = getProfileLabel(profile);
+        {instances.map((instance) => {
+          const index = instanceIndex(instances, instance.id);
+          const selectedHere = selectedTargets
+            .filter((target) => target.instanceId === instance.id)
+            .map((target) => target.profile);
 
-            return (
-              <Tooltip key={profile}>
-                <TooltipTrigger asChild>
-                  <ToggleGroupItem
-                    value={profile}
-                    aria-label={`Select ${label} profile`}
-                    data-testid={`profile-button-${profile}`}
-                    data-state={isSelected ? 'on' : 'off'}
-                    className="relative flex-col"
-                  >
-                    {isSelected && loading ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      iconMap[profile as keyof typeof iconMap]
-                    )}
-                    {/* Colour key tying this profile to its lines/polygons. */}
-                    {isSelected && (
-                      <span
-                        aria-hidden
-                        className="absolute inset-x-1 bottom-0.5 h-1 rounded-full"
-                        style={{ backgroundColor: getProfileColor(profile) }}
-                      />
-                    )}
-                  </ToggleGroupItem>
-                </TooltipTrigger>
-                <TooltipContent>{label}</TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </ToggleGroup>
+          return (
+            <div key={instance.id} className="flex flex-col gap-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-semibold">{instance.label}</span>
+                <span
+                  className="text-muted-foreground truncate text-[10px]"
+                  title={instance.url}
+                >
+                  {instance.url}
+                </span>
+              </div>
+
+              <ToggleGroup
+                type="multiple"
+                variant="outline"
+                size="lg"
+                value={selectedHere}
+                className="[&_button]:h-12 [&_button]:min-w-11 [&_button]:px-1"
+                onValueChange={(value: string[]) => {
+                  // Radix hands back the raw set; re-order it so the list keeps
+                  // the picker's left-to-right order and stays stable in the URL.
+                  handleInstanceChange(
+                    instance.id,
+                    profiles.filter((p) => value.includes(p))
+                  );
+                }}
+              >
+                {profiles.map((profile) => {
+                  const isSelected = selectedHere.includes(profile);
+                  const label = getProfileLabel(profile);
+                  const target = { instanceId: instance.id, profile };
+
+                  return (
+                    <Tooltip key={targetKey(target)}>
+                      <TooltipTrigger asChild>
+                        <ToggleGroupItem
+                          value={profile}
+                          aria-label={`Select ${label} profile on ${instance.label}`}
+                          data-testid={`profile-button-${targetKey(target)}`}
+                          data-state={isSelected ? 'on' : 'off'}
+                          className="relative flex-col"
+                        >
+                          {isSelected && loading ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            iconMap[profile as keyof typeof iconMap]
+                          )}
+                          {/* Colour key tying this target to its lines/polygons. */}
+                          {isSelected && (
+                            <span
+                              aria-hidden
+                              className="absolute inset-x-1 bottom-0.5 h-1 rounded-full"
+                              style={{
+                                backgroundColor: getTargetColor(index, profile),
+                              }}
+                            />
+                          )}
+                        </ToggleGroupItem>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {label} · {instance.label}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </ToggleGroup>
+            </div>
+          );
+        })}
       </TooltipProvider>
+
       <p className="text-muted-foreground text-xs">
-        {selectedProfiles.length > 1
-          ? `Comparing ${selectedProfiles.length.toString()} profiles — each is routed between the same waypoints.`
-          : 'Select more than one profile to compare them side by side.'}
+        {selectedTargets.length > 1
+          ? `Comparing ${selectedTargets.length.toString()} targets — each is routed between the same waypoints.`
+          : 'Select more profiles, on any server, to compare them side by side.'}
       </p>
     </div>
   );

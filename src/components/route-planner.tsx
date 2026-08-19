@@ -8,7 +8,8 @@ const TilesControl = lazy(() =>
   import('./tiles/tiles').then((module) => ({ default: module.TilesControl }))
 );
 import { useCommonStore } from '@/stores/common-store';
-import { getValhallaUrl, VALHALLA_CLIENT_HEADERS } from '@/utils/valhalla';
+import { getInstanceUrl, VALHALLA_CLIENT_HEADERS } from '@/utils/valhalla';
+import { useInstancesStore } from '@/stores/instances-store';
 import {
   Sheet,
   SheetContent,
@@ -21,8 +22,7 @@ import { X } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { ProfilePicker } from './profile-picker';
-import type { Profile } from '@/stores/common-store';
-import { serializeProfiles } from '@/utils/profiles';
+import { serializeTargets, type TargetRef } from '@/utils/targets';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
 
@@ -51,6 +51,10 @@ export const RoutePlanner = () => {
   const { refetch: refetchIsochrones } = useIsochronesQuery();
   const loading = useCommonStore((state) => state.loading);
   const toggleDirections = useCommonStore((state) => state.toggleDirections);
+  // The tileset date shown in the footer belongs to one server; use the first.
+  const primaryInstanceId = useInstancesStore(
+    (state) => state.instances[0]?.id ?? 'public'
+  );
 
   const tabConfig = TAB_CONFIG[activeTab as keyof typeof TAB_CONFIG];
 
@@ -59,11 +63,14 @@ export const RoutePlanner = () => {
     isLoading: isLoadingLastUpdate,
     isError: isErrorLastUpdate,
   } = useQuery({
-    queryKey: ['lastUpdate'],
+    queryKey: ['lastUpdate', primaryInstanceId],
     queryFn: async () => {
-      const response = await fetch(`${getValhallaUrl()}/status`, {
-        headers: VALHALLA_CLIENT_HEADERS,
-      });
+      const response = await fetch(
+        `${getInstanceUrl(primaryInstanceId)}/status`,
+        {
+          headers: VALHALLA_CLIENT_HEADERS,
+        }
+      );
       const data = await response.json();
       return new Date(data.tileset_last_modified * 1000);
     },
@@ -75,9 +82,9 @@ export const RoutePlanner = () => {
     navigate({ params: { activeTab: value } });
   };
 
-  const handleProfileChange = (value: Profile[]) => {
+  const handleTargetsChange = (value: TargetRef[]) => {
     navigate({
-      search: (prev) => ({ ...prev, profile: serializeProfiles(value) }),
+      search: (prev) => ({ ...prev, profile: serializeTargets(value) }),
       replace: true,
     });
 
@@ -141,7 +148,7 @@ export const RoutePlanner = () => {
             <div className="px-2 mb-1">
               <ProfilePicker
                 loading={loading}
-                onProfileChange={handleProfileChange}
+                onTargetsChange={handleTargetsChange}
               />
             </div>
           )}

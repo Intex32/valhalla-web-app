@@ -49,9 +49,7 @@ export const WaypointSearch = ({
   rightContent,
 }: WaypointSearchProps) => {
   const { mainMap } = useMap();
-  const use_geocoding = useCommonStore(
-    (state) => state.shared.values.use_geocoding
-  );
+  const use_geocoding = useCommonStore((state) => state.useGeocoding);
 
   const [open, setOpen] = useState(false);
   const [internalValue, setInternalValue] = useState('');

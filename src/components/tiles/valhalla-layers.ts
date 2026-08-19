@@ -1,5 +1,6 @@
 import type { LayerSpecification, SourceSpecification } from 'maplibre-gl';
-import { getBaseUrl, normalizeBaseUrl } from '@/utils/base-url';
+import { getInstanceUrl } from '@/utils/valhalla';
+import { useInstancesStore } from '@/stores/instances-store';
 
 export const VALHALLA_SOURCE_ID = 'valhalla-tiles';
 export const VALHALLA_EDGES_LAYER_ID = 'valhalla-edges';
@@ -15,9 +16,10 @@ export const VALHALLA_ACCESS_RESTRICTIONS_TIMED_LAYER_ID =
 const TILE_JSON_ENCODED =
   '%7B%22verbose%22%3A%20true%2C%20%22tile%22%3A%7B%22z%22%3A{z}%2C%22x%22%3A{x}%2C%22y%22%3A{y}%7D%7D';
 
+/** The tiles tab inspects one server at a time — the first in the list. */
 export function getValhallaTileUrl(): string {
-  const baseUrl = normalizeBaseUrl(getBaseUrl());
-  return `${baseUrl}/tile?json=${TILE_JSON_ENCODED}`;
+  const primaryId = useInstancesStore.getState().instances[0]?.id ?? 'public';
+  return `${getInstanceUrl(primaryId)}/tile?json=${TILE_JSON_ENCODED}`;
 }
 
 export function getValhallaSourceSpec(): SourceSpecification {

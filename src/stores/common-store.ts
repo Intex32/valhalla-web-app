@@ -5,8 +5,8 @@ import type { PossibleSettings } from '@/components/types';
 import {
   settingsInit,
   settingsInitTruckOverride,
-  QUICK_SETTING_PARAMS,
 } from '@/components/settings-panel/settings-options';
+import { targetKey, type TargetRef } from '@/utils/targets';
 import { z } from 'zod';
 
 export const profileEnum = z.enum([
@@ -40,25 +40,30 @@ const createScope = (
   enabled: {},
 });
 
-const seedFor = (profile: Profile): PossibleSettings =>
-  profile === 'truck' ? settingsInitTruckOverride : settingsInit;
+const seedFor = (profile: Profile): PossibleSettings => ({
+  ...(profile === 'truck' ? settingsInitTruckOverride : settingsInit),
+  // Alternates are per target and off by default — comparing servers is about
+  // the main route, and every extra alternate is another request's worth of work.
+  alternates: 0,
+});
 
-// One stable fallback per profile, so reading a scope the user hasn't touched
+// One stable fallback per target, so reading a scope the user hasn't touched
 // yet doesn't hand React a new object on every render.
-const untouchedScopes = new Map<Profile, ScopedSettings>();
+const untouchedScopes = new Map<string, ScopedSettings>();
 
-/** A profile's own scope, seeded on read so the panel renders before any edit. */
-export const getProfileScope = (
-  perProfile: Partial<Record<Profile, ScopedSettings>>,
-  profile: Profile
+/** A target's own scope, seeded on read so the panel renders before any edit. */
+export const getTargetScope = (
+  perTarget: Record<string, ScopedSettings>,
+  target: TargetRef
 ): ScopedSettings => {
-  const edited = perProfile[profile];
+  const edited = perTarget[targetKey(target)];
   if (edited) return edited;
 
-  let untouched = untouchedScopes.get(profile);
+  const key = targetKey(target);
+  let untouched = untouchedScopes.get(key);
   if (!untouched) {
-    untouched = createScope(seedFor(profile));
-    untouchedScopes.set(profile, untouched);
+    untouched = createScope(seedFor(target.profile));
+    untouchedScopes.set(key, untouched);
   }
   return untouched;
 };
@@ -68,10 +73,12 @@ interface CommonState {
   directionsPanelOpen: boolean;
   coordinates: number[][];
   loading: boolean;
-  /** General costing options, applied to every profile that understands them. */
-  shared: ScopedSettings;
-  /** Options a profile owns privately; these win over the shared value. */
-  perProfile: Partial<Record<Profile, ScopedSettings>>;
+  /** Costing options per (instance, profile) target — nothing is shared. */
+  perTarget: Record<string, ScopedSettings>;
+  /** Polygons drawn on the map; one drawing applies to every target. */
+  excludePolygons: GeoJSON.GeoJSON[];
+  /** Client-side only: whether waypoint input reverse-geocodes. */
+  useGeocoding: boolean;
   dateTime: { type: number; value: string };
   mapReady: boolean;
 }
@@ -81,23 +88,20 @@ interface CommonActions {
   zoomTo: (coordinates: number[][]) => void;
   toggleSettings: () => void;
   toggleDirections: () => void;
-  /** Sets a shared value and opts it in — editing a setting means wanting it sent. */
-  updateSharedSetting: (
+  /** Sets a target's value and opts it in — editing means wanting it sent. */
+  updateTargetSetting: (
+    target: TargetRef,
     param: keyof PossibleSettings,
     value: PossibleSettings[keyof PossibleSettings]
   ) => void;
-  setSharedEnabled: (param: string, enabled: boolean) => void;
-  updateProfileSetting: (
-    profile: Profile,
-    param: keyof PossibleSettings,
-    value: PossibleSettings[keyof PossibleSettings]
-  ) => void;
-  setProfileEnabled: (
-    profile: Profile,
+  setTargetEnabled: (
+    target: TargetRef,
     param: string,
     enabled: boolean
   ) => void;
-  resetSettings: (profiles: Profile[]) => void;
+  setExcludePolygons: (polygons: GeoJSON.GeoJSON[]) => void;
+  setUseGeocoding: (useGeocoding: boolean) => void;
+  resetSettings: (targets: TargetRef[]) => void;
   updateDateTime: (key: 'type' | 'value', value: string | number) => void;
   setMapReady: (ready: boolean) => void;
 }
@@ -115,8 +119,9 @@ export const useCommonStore = create<CommonStore>()(
       directionsPanelOpen: DEFAULT_PANEL_OPEN,
       coordinates: [],
       loading: false,
-      shared: createScope(),
-      perProfile: {},
+      perTarget: {},
+      excludePolygons: [],
+      useGeocoding: true,
       dateTime: {
         type: -1,
         value: new Date().toISOString().slice(0, 16),
@@ -142,68 +147,58 @@ export const useCommonStore = create<CommonStore>()(
           undefined,
           'toggleDirections'
         ),
-      updateSharedSetting: (param, value) =>
+      updateTargetSetting: (target, param, value) =>
         set(
           (state) => {
-            state.shared.values[param] = value;
+            const key = targetKey(target);
+            state.perTarget[key] ??= createScope(seedFor(target.profile));
+            state.perTarget[key].values[param] = value;
             // Touching a control is the user asking for that value to be used,
             // so it opts itself in rather than needing a second click.
-            state.shared.enabled[param] = true;
+            state.perTarget[key].enabled[param] = true;
           },
           undefined,
-          'updateSharedSetting'
+          'updateTargetSetting'
         ),
 
-      setSharedEnabled: (param, enabled) =>
+      setTargetEnabled: (target, param, enabled) =>
         set(
           (state) => {
+            const key = targetKey(target);
+            state.perTarget[key] ??= createScope(seedFor(target.profile));
             // The value is left in place so unchecking and re-checking restores
             // what the user had dialled in.
-            state.shared.enabled[param] = enabled;
+            state.perTarget[key].enabled[param] = enabled;
           },
           undefined,
-          'setSharedEnabled'
+          'setTargetEnabled'
         ),
 
-      updateProfileSetting: (profile, param, value) =>
+      setExcludePolygons: (polygons) =>
         set(
           (state) => {
-            state.perProfile[profile] ??= createScope(seedFor(profile));
-            state.perProfile[profile].values[param] = value;
-            state.perProfile[profile].enabled[param] = true;
+            state.excludePolygons = polygons;
           },
           undefined,
-          'updateProfileSetting'
+          'setExcludePolygons'
         ),
 
-      setProfileEnabled: (profile, param, enabled) =>
+      setUseGeocoding: (useGeocoding) =>
         set(
           (state) => {
-            state.perProfile[profile] ??= createScope(seedFor(profile));
-            state.perProfile[profile].enabled[param] = enabled;
+            state.useGeocoding = useGeocoding;
           },
           undefined,
-          'setProfileEnabled'
+          'setUseGeocoding'
         ),
 
-      resetSettings: (profiles) =>
+      resetSettings: (targets) =>
         set(
           (state) => {
-            // Quick-panel params are cross-profile user preferences carried in
-            // the URL, so a reset of the advanced panel leaves them alone.
-            const preserved: Partial<PossibleSettings> = {};
-            const preservedEnabled: Record<string, boolean> = {};
-            for (const param of QUICK_SETTING_PARAMS) {
-              preserved[param] = state.shared.values[param];
-              preservedEnabled[param] = state.shared.enabled[param] ?? false;
-            }
-
-            state.shared = {
-              values: { ...settingsInit, ...preserved },
-              enabled: preservedEnabled,
-            };
-            for (const profile of profiles) {
-              state.perProfile[profile] = createScope(seedFor(profile));
+            for (const target of targets) {
+              state.perTarget[targetKey(target)] = createScope(
+                seedFor(target.profile)
+              );
             }
           },
           undefined,

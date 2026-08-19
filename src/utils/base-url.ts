@@ -1,9 +1,7 @@
 import { z } from 'zod';
 
-const BASE_URL_STORAGE_KEY = 'valhalla_base_url';
-
-const DEFAULT_BASE_URL =
-  import.meta.env.VITE_VALHALLA_URL || 'https://valhalla1.openstreetmap.de';
+// The app routes against a list of instances now (see stores/instances-store).
+// What is left here are the per-URL helpers that list uses.
 
 const baseUrlSchema = z
   .string()
@@ -21,38 +19,6 @@ const baseUrlSchema = z
     },
     { message: 'URL must use HTTP or HTTPS protocol' }
   );
-
-export function getBaseUrl(): string {
-  if (typeof window === 'undefined') {
-    return DEFAULT_BASE_URL;
-  }
-
-  const stored = localStorage.getItem(BASE_URL_STORAGE_KEY);
-
-  if (stored) {
-    return stored;
-  }
-
-  return DEFAULT_BASE_URL;
-}
-
-export function setBaseUrl(url: string): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const trimmedUrl = url.trim();
-
-  if (trimmedUrl === '' || trimmedUrl === DEFAULT_BASE_URL) {
-    localStorage.removeItem(BASE_URL_STORAGE_KEY);
-  } else {
-    localStorage.setItem(BASE_URL_STORAGE_KEY, trimmedUrl);
-  }
-}
-
-export function getDefaultBaseUrl(): string {
-  return DEFAULT_BASE_URL;
-}
 
 export interface UrlValidationResult {
   valid: boolean;

@@ -1,68 +1,12 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import {
-  getBaseUrl,
-  setBaseUrl,
-  getDefaultBaseUrl,
-  validateBaseUrl,
-  normalizeBaseUrl,
-  testConnection,
-} from './base-url';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { validateBaseUrl, normalizeBaseUrl, testConnection } from './base-url';
 
-const STORAGE_KEY = 'valhalla_base_url';
-const TEST_CUSTOM_URL = 'https://custom.valhalla.com';
-
+// The single stored base URL is gone — the app keeps a list of instances (see
+// stores/instances-store). What is left here are the per-URL helpers that list
+// and the server-settings panel use.
 describe('base-url', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  describe('getDefaultBaseUrl', () => {
-    it('should return the environment variable value', () => {
-      const defaultUrl = getDefaultBaseUrl();
-      expect(defaultUrl).toBeTruthy();
-      expect(typeof defaultUrl).toBe('string');
-    });
-  });
-
-  describe('getBaseUrl', () => {
-    it('should return default URL when localStorage is empty', () => {
-      const defaultUrl = getDefaultBaseUrl();
-      expect(getBaseUrl()).toBe(defaultUrl);
-    });
-
-    it('should return stored URL when present in localStorage', () => {
-      localStorage.setItem(STORAGE_KEY, TEST_CUSTOM_URL);
-      expect(getBaseUrl()).toBe(TEST_CUSTOM_URL);
-    });
-  });
-
-  describe('setBaseUrl', () => {
-    it('should store URL in localStorage', () => {
-      setBaseUrl(TEST_CUSTOM_URL);
-      expect(localStorage.getItem(STORAGE_KEY)).toBe(TEST_CUSTOM_URL);
-    });
-
-    it('should remove from localStorage when URL matches default', () => {
-      const defaultUrl = getDefaultBaseUrl();
-      localStorage.setItem(STORAGE_KEY, TEST_CUSTOM_URL);
-      setBaseUrl(defaultUrl);
-      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-    });
-
-    it('should remove from localStorage when URL is empty', () => {
-      localStorage.setItem(STORAGE_KEY, TEST_CUSTOM_URL);
-      setBaseUrl('');
-      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-    });
-
-    it('should trim whitespace from URL', () => {
-      setBaseUrl('  ' + TEST_CUSTOM_URL + '  ');
-      expect(localStorage.getItem(STORAGE_KEY)).toBe(TEST_CUSTOM_URL);
-    });
   });
 
   describe('validateBaseUrl', () => {
@@ -266,6 +210,24 @@ describe('base-url', () => {
       await testConnection('https://example.com/');
       expect(fetchSpy).toHaveBeenCalledWith(
         'https://example.com/status',
+        expect.any(Object)
+      );
+    });
+
+    it('should keep an instance URL that lives under a path', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({ available_actions: ['route', 'isochrone'] }),
+      } as unknown as Response);
+
+      // A locally proxied instance is often mounted on a subpath.
+      const result = await testConnection('http://localhost:3000/valhalla/');
+
+      expect(result.reachable).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://localhost:3000/valhalla/status',
         expect.any(Object)
       );
     });

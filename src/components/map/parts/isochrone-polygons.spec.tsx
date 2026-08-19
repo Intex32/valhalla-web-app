@@ -1,14 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { IsochronePolygons } from './isochrone-polygons';
-import {
-  getProfileColor,
-  getProfileContourColor,
-} from '@/utils/profile-colors';
+import { getTargetColor, getTargetContourColor } from '@/utils/profile-colors';
 import {
   ISOCHRONE_PALETTES,
   getPaletteColor,
 } from '@/utils/isochrone-palettes';
+import { targetKey, type TargetRef } from '@/utils/targets';
 
 const mockSource = vi.fn();
 const mockLayer = vi.fn();
@@ -26,10 +24,48 @@ vi.mock('react-map-gl/maplibre', () => ({
 
 const mockUseIsochronesStore = vi.fn();
 
-vi.mock('@/stores/isochrones-store', () => ({
-  useIsochronesStore: (selector: (state: unknown) => unknown) =>
-    mockUseIsochronesStore(selector),
+vi.mock('@/stores/isochrones-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/isochrones-store')>();
+
+  return {
+    ...actual,
+    useIsochronesStore: (selector: (state: unknown) => unknown) =>
+      mockUseIsochronesStore(selector),
+  };
+});
+
+// Two instances in a fixed order: `instanceIndex` (kept real) turns that order
+// into the colour shade, so 'public' is 0 and 'local' is 1.
+const { mockInstances } = vi.hoisted(() => ({
+  mockInstances: [
+    {
+      id: 'public',
+      label: 'Public',
+      url: 'https://valhalla1.openstreetmap.de',
+    },
+    { id: 'local', label: 'Local', url: 'http://localhost:8002' },
+  ],
 }));
+
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+
+  return {
+    ...actual,
+    useInstancesStore: (selector: (state: unknown) => unknown) =>
+      selector({ instances: mockInstances }),
+  };
+});
+
+const publicCar: TargetRef = { instanceId: 'public', profile: 'car' };
+const publicEmergency: TargetRef = {
+  instanceId: 'public',
+  profile: 'emergency',
+};
+const localCar: TargetRef = { instanceId: 'local', profile: 'car' };
+const ghostCar: TargetRef = { instanceId: 'ghost', profile: 'car' };
 
 const polygon = (contour: number, fill: string) => ({
   type: 'Feature',
@@ -54,10 +90,14 @@ const isochroneResponse = () => ({
   features: [polygon(5, '#ff0000'), polygon(10, '#00ff00')],
 });
 
+const showAll = (targets: TargetRef[]) =>
+  Object.fromEntries(targets.map((target) => [targetKey(target), true]));
+
 const createMockState = (overrides = {}) => ({
   results: {
-    byProfile: [{ profile: 'car', data: isochroneResponse() }],
-    show: { car: true },
+    byTarget: [{ target: publicCar, data: isochroneResponse() }],
+    failures: [],
+    show: showAll([publicCar]),
   },
   successful: true,
   colorPalette: 'default',
@@ -65,14 +105,30 @@ const createMockState = (overrides = {}) => ({
   ...overrides,
 });
 
+/** Two profiles on the same server. */
 const createMultiProfileState = (overrides = {}) =>
   createMockState({
     results: {
-      byProfile: [
-        { profile: 'car', data: isochroneResponse() },
-        { profile: 'emergency', data: isochroneResponse() },
+      byTarget: [
+        { target: publicCar, data: isochroneResponse() },
+        { target: publicEmergency, data: isochroneResponse() },
       ],
-      show: { car: true, emergency: true },
+      failures: [],
+      show: showAll([publicCar, publicEmergency]),
+    },
+    ...overrides,
+  });
+
+/** The same profile on two servers — two independent targets. */
+const createMultiInstanceState = (overrides = {}) =>
+  createMockState({
+    results: {
+      byTarget: [
+        { target: publicCar, data: isochroneResponse() },
+        { target: localCar, data: isochroneResponse() },
+      ],
+      failures: [],
+      show: showAll([publicCar, localCar]),
     },
     ...overrides,
   });
@@ -95,9 +151,9 @@ describe('IsochronePolygons', () => {
     mockUseIsochronesStore.mockClear();
   });
 
-  it('should render nothing when no profile returned isochrones', () => {
+  it('should render nothing when no target returned isochrones', () => {
     const { container } = renderWithState(
-      createMockState({ results: { byProfile: [], show: {} } })
+      createMockState({ results: { byTarget: [], failures: [], show: {} } })
     );
 
     expect(container.firstChild).toBeNull();
@@ -111,12 +167,27 @@ describe('IsochronePolygons', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('should render nothing when every profile is hidden', () => {
+  it('should render nothing when every target is hidden', () => {
     const { container } = renderWithState(
       createMockState({
         results: {
-          byProfile: [{ profile: 'car', data: isochroneResponse() }],
-          show: { car: false },
+          byTarget: [{ target: publicCar, data: isochroneResponse() }],
+          failures: [],
+          show: { [targetKey(publicCar)]: false },
+        },
+      })
+    );
+
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('should render nothing when every target belongs to an unknown instance', () => {
+    const { container } = renderWithState(
+      createMockState({
+        results: {
+          byTarget: [{ target: ghostCar, data: isochroneResponse() }],
+          failures: [],
+          show: showAll([ghostCar]),
         },
       })
     );
@@ -170,9 +241,9 @@ describe('IsochronePolygons', () => {
     renderWithState(
       createMockState({
         results: {
-          byProfile: [
+          byTarget: [
             {
-              profile: 'car',
+              target: publicCar,
               data: {
                 type: 'FeatureCollection',
                 features: [
@@ -186,7 +257,8 @@ describe('IsochronePolygons', () => {
               },
             },
           ],
-          show: { car: true },
+          failures: [],
+          show: showAll([publicCar]),
         },
       })
     );
@@ -204,7 +276,21 @@ describe('IsochronePolygons', () => {
     ]);
   });
 
-  it("should keep Valhalla's own fill and a white outline for one profile on the default palette", () => {
+  it('should tag each feature with the target that produced it', () => {
+    renderWithState(createMultiInstanceState());
+
+    const features = renderedFeatures() ?? [];
+    expect(
+      features.map((f) => [f.properties.instanceId, f.properties.profile])
+    ).toEqual(
+      expect.arrayContaining([
+        ['public', 'car'],
+        ['local', 'car'],
+      ])
+    );
+  });
+
+  it("should keep Valhalla's own fill and a white outline for one target on the default palette", () => {
     renderWithState(createMockState());
 
     const features = renderedFeatures() ?? [];
@@ -215,7 +301,7 @@ describe('IsochronePolygons', () => {
     expect(features.every((f) => f.properties.outline === '#fff')).toBe(true);
   });
 
-  it('should apply the selected palette for a single profile', () => {
+  it('should apply the selected palette for a single target', () => {
     const viridis = ISOCHRONE_PALETTES.find((p) => p.id === 'viridis');
     const colors = viridis?.colors ?? [];
 
@@ -226,7 +312,7 @@ describe('IsochronePolygons', () => {
     expect(features[1]?.properties.fill).toBe(getPaletteColor(colors, 0.5));
   });
 
-  it('should colour contours per profile when several profiles are visible', () => {
+  it('should colour contours per target when several targets are visible', () => {
     renderWithState(createMultiProfileState());
 
     const features = renderedFeatures() ?? [];
@@ -238,32 +324,94 @@ describe('IsochronePolygons', () => {
     );
 
     expect(car.map((f) => f.properties.fill)).toEqual([
-      getProfileContourColor('car', 1),
-      getProfileContourColor('car', 0.5),
+      getTargetContourColor(0, 'car', 1),
+      getTargetContourColor(0, 'car', 0.5),
     ]);
     expect(emergency.map((f) => f.properties.fill)).toEqual([
-      getProfileContourColor('emergency', 1),
-      getProfileContourColor('emergency', 0.5),
+      getTargetContourColor(0, 'emergency', 1),
+      getTargetContourColor(0, 'emergency', 0.5),
     ]);
     expect(
-      car.every((f) => f.properties.outline === getProfileColor('car'))
+      car.every((f) => f.properties.outline === getTargetColor(0, 'car'))
     ).toBe(true);
     expect(
       emergency.every(
-        (f) => f.properties.outline === getProfileColor('emergency')
+        (f) => f.properties.outline === getTargetColor(0, 'emergency')
       )
     ).toBe(true);
   });
 
-  it('should drop hidden profiles but keep the remaining one in its own colour', () => {
+  it('should shade the same profile differently per instance', () => {
+    renderWithState(createMultiInstanceState());
+
+    const features = renderedFeatures() ?? [];
+    expect(features).toHaveLength(4);
+
+    const fromPublic = features.filter(
+      (f) => f.properties.instanceId === 'public'
+    );
+    const fromLocal = features.filter(
+      (f) => f.properties.instanceId === 'local'
+    );
+
+    expect(fromPublic.map((f) => f.properties.fill)).toEqual([
+      getTargetContourColor(0, 'car', 1),
+      getTargetContourColor(0, 'car', 0.5),
+    ]);
+    expect(fromLocal.map((f) => f.properties.fill)).toEqual([
+      getTargetContourColor(1, 'car', 1),
+      getTargetContourColor(1, 'car', 0.5),
+    ]);
+    // Same hue family, different shade — otherwise the two servers' contours
+    // would be indistinguishable on the map.
+    expect(fromPublic[0]?.properties.fill).not.toBe(
+      fromLocal[0]?.properties.fill
+    );
+    expect(fromPublic[0]?.properties.outline).toBe(getTargetColor(0, 'car'));
+    expect(fromLocal[0]?.properties.outline).toBe(getTargetColor(1, 'car'));
+  });
+
+  it('should drop targets on a removed instance, palette-colouring the one left', () => {
+    renderWithState(
+      createMultiInstanceState({
+        results: {
+          byTarget: [
+            { target: publicCar, data: isochroneResponse() },
+            { target: ghostCar, data: isochroneResponse() },
+          ],
+          failures: [],
+          show: showAll([publicCar, ghostCar]),
+        },
+      })
+    );
+
+    const features = renderedFeatures() ?? [];
+    expect(features).toHaveLength(2);
+    expect(features.every((f) => f.properties.instanceId === 'public')).toBe(
+      true
+    );
+    // Only one *known* target was routed, so this is single-target colouring
+    // again — Valhalla's own fill and a white outline.
+    expect(features.map((f) => f.properties.fill)).toEqual([
+      '#00ff00',
+      '#ff0000',
+    ]);
+    expect(features.every((f) => f.properties.outline === '#fff')).toBe(true);
+  });
+
+  it('should drop hidden targets but keep the remaining one in its own colour', () => {
     renderWithState(
       createMultiProfileState({
         results: {
-          byProfile: [
-            { profile: 'car', data: isochroneResponse() },
-            { profile: 'emergency', data: isochroneResponse() },
+          byTarget: [
+            { target: publicCar, data: isochroneResponse() },
+            { target: publicEmergency, data: isochroneResponse() },
           ],
-          show: { car: true, emergency: false },
+          failures: [],
+          show: {
+            [targetKey(publicCar)]: true,
+            [targetKey(publicEmergency)]: false,
+          },
         },
       })
     );
@@ -271,14 +419,42 @@ describe('IsochronePolygons', () => {
     const features = renderedFeatures() ?? [];
     expect(features).toHaveLength(2);
     expect(features.every((f) => f.properties.profile === 'car')).toBe(true);
-    // Two profiles were routed, so car keeps the profile ramp it had while
-    // both were visible — otherwise it would no longer match its colour key.
+    // Two targets were routed, so car keeps the target ramp it had while both
+    // were visible — otherwise it would no longer match its colour key.
     expect(features.map((f) => f.properties.fill)).toEqual([
-      getProfileContourColor('car', 1),
-      getProfileContourColor('car', 0.5),
+      getTargetContourColor(0, 'car', 1),
+      getTargetContourColor(0, 'car', 0.5),
     ]);
     expect(
-      features.every((f) => f.properties.outline === getProfileColor('car'))
+      features.every((f) => f.properties.outline === getTargetColor(0, 'car'))
     ).toBe(true);
+  });
+
+  it('should keep the target ramp when the other instance is hidden', () => {
+    renderWithState(
+      createMultiInstanceState({
+        results: {
+          byTarget: [
+            { target: publicCar, data: isochroneResponse() },
+            { target: localCar, data: isochroneResponse() },
+          ],
+          failures: [],
+          show: {
+            [targetKey(publicCar)]: false,
+            [targetKey(localCar)]: true,
+          },
+        },
+      })
+    );
+
+    const features = renderedFeatures() ?? [];
+    expect(features).toHaveLength(2);
+    expect(features.every((f) => f.properties.instanceId === 'local')).toBe(
+      true
+    );
+    expect(features.map((f) => f.properties.fill)).toEqual([
+      getTargetContourColor(1, 'car', 1),
+      getTargetContourColor(1, 'car', 0.5),
+    ]);
   });
 });

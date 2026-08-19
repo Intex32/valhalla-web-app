@@ -10,8 +10,14 @@ interface SettingsGroupFieldsProps {
   group: SettingsGroup;
   values: PossibleSettings;
   enabled: Record<string, boolean>;
-  /** Params to leave out entirely (e.g. those hosted by QuickSettings). */
+  /** Params to leave out entirely (e.g. request-level ones). */
   omitParams?: ReadonlySet<string>;
+  /**
+   * Scopes every control id. Without it two targets rendering the same option
+   * produce duplicate DOM ids, and clicking one section's label toggles the
+   * other section's control.
+   */
+  idPrefix?: string;
   /** Writes the value (and opts the option in). No request — drags stay smooth. */
   onValueChange: (
     param: keyof PossibleSettings,
@@ -31,11 +37,14 @@ export const SettingsGroupFields = ({
   values,
   enabled,
   omitParams,
+  idPrefix,
   onValueChange,
   onCommit,
   onIncludedChange,
 }: SettingsGroupFieldsProps) => {
   const isOmitted = (param: string) => omitParams?.has(param) ?? false;
+  const controlId = (param: string) =>
+    idPrefix ? `${idPrefix}-${param}` : param;
 
   const commitValue = (
     param: keyof PossibleSettings,
@@ -50,6 +59,7 @@ export const SettingsGroupFields = ({
       key={param}
       param={param}
       label={label}
+      idPrefix={idPrefix}
       included={enabled[param] ?? false}
       onIncludedChange={(included) => onIncludedChange(param, included)}
     >
@@ -66,7 +76,7 @@ export const SettingsGroupFields = ({
             option.param,
             option.name,
             <SliderSetting
-              id={option.param}
+              id={controlId(option.param)}
               label={option.name}
               description={option.description}
               min={option.settings.min}
@@ -97,7 +107,7 @@ export const SettingsGroupFields = ({
             option.param,
             option.name,
             <CheckboxSetting
-              id={option.param}
+              id={controlId(option.param)}
               label={option.name}
               description={option.description}
               checked={Boolean(values[option.param])}
@@ -113,7 +123,7 @@ export const SettingsGroupFields = ({
             option.param,
             option.name,
             <SelectSetting
-              id={option.param}
+              id={controlId(option.param)}
               label={option.name}
               description={option.description}
               placeholder={`Select ${option.name}`}
@@ -131,7 +141,7 @@ export const SettingsGroupFields = ({
             option.param,
             option.name,
             <MultiSelectSetting
-              id={option.param}
+              id={controlId(option.param)}
               label={option.name}
               description={option.description}
               value={(values[option.param] as string[]) ?? ['current']}

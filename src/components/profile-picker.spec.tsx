@@ -3,271 +3,348 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ProfilePicker } from './profile-picker';
 import { useSearch } from '@tanstack/react-router';
-import { getProfileColor } from '@/utils/profile-colors';
+import { getTargetColor } from '@/utils/profile-colors';
 
-const mockResetSettings = vi.fn();
-const mockOnProfileChange = vi.fn();
+const mockOnTargetsChange = vi.fn();
+
+const instances = [
+  { id: 'public', label: 'Public', url: 'https://valhalla1.openstreetmap.de' },
+  { id: 'local', label: 'Local', url: 'http://localhost:8002' },
+];
 
 vi.mock('@tanstack/react-router', () => ({
-  useSearch: vi.fn(() => ({ profile: 'bicycle' })),
+  useSearch: vi.fn(() => ({ profile: 'public:bicycle' })),
 }));
 
-vi.mock('@/stores/common-store', () => ({
-  useCommonStore: vi.fn((selector) =>
-    selector({
-      resetSettings: mockResetSettings,
-    })
-  ),
-}));
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+  return {
+    ...actual,
+    useInstancesStore: vi.fn((selector: (state: unknown) => unknown) =>
+      selector({ instances })
+    ),
+  };
+});
 
-/** The picker reads its selection from the comma-separated `profile` param. */
-const selectProfiles = (profile: string) => {
+/**
+ * The picker reads its selection from the comma-separated, instance-qualified
+ * `profile` param — `public:car,local:emergency`.
+ */
+const selectTargets = (profile: string) => {
   (useSearch as Mock).mockReturnValue({ profile });
 };
+
+const renderPicker = (loading = false) =>
+  render(
+    <ProfilePicker loading={loading} onTargetsChange={mockOnTargetsChange} />
+  );
 
 describe('ProfilePicker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    selectProfiles('bicycle');
+    selectTargets('public:bicycle');
   });
 
   it('should render without crashing', () => {
-    expect(() =>
-      render(
-        <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-      )
-    ).not.toThrow();
+    expect(() => renderPicker()).not.toThrow();
   });
 
-  it('should render all profile buttons', () => {
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+  it('should render one row of profile buttons per instance', () => {
+    renderPicker();
 
-    expect(screen.getByTestId('profile-button-bicycle')).toBeInTheDocument();
-    expect(screen.getByTestId('profile-button-pedestrian')).toBeInTheDocument();
-    expect(screen.getByTestId('profile-button-car')).toBeInTheDocument();
-    expect(screen.getByTestId('profile-button-truck')).toBeInTheDocument();
-    expect(screen.getByTestId('profile-button-bus')).toBeInTheDocument();
+    for (const profile of [
+      'bicycle',
+      'pedestrian',
+      'car',
+      'truck',
+      'bus',
+      'motor_scooter',
+      'motorcycle',
+      'emergency',
+    ]) {
+      expect(
+        screen.getByTestId(`profile-button-public__${profile}`)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId(`profile-button-local__${profile}`)
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('should label each instance row with its name and url', () => {
+    renderPicker();
+
+    expect(screen.getByText('Public')).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
     expect(
-      screen.getByTestId('profile-button-motor_scooter')
+      screen.getByText('https://valhalla1.openstreetmap.de')
     ).toBeInTheDocument();
-    expect(screen.getByTestId('profile-button-motorcycle')).toBeInTheDocument();
-    expect(screen.getByTestId('profile-button-emergency')).toBeInTheDocument();
+    expect(screen.getByText('http://localhost:8002')).toBeInTheDocument();
   });
 
-  it('should highlight the selected profile', () => {
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+  it('should highlight the selected target only on its own instance', () => {
+    renderPicker();
 
-    const bicycleButton = screen.getByTestId('profile-button-bicycle');
-    expect(bicycleButton).toHaveAttribute('data-state', 'on');
-    expect(bicycleButton).toHaveAttribute('aria-pressed', 'true');
+    const selected = screen.getByTestId('profile-button-public__bicycle');
+    expect(selected).toHaveAttribute('data-state', 'on');
+    expect(selected).toHaveAttribute('aria-pressed', 'true');
 
-    const carButton = screen.getByTestId('profile-button-car');
-    expect(carButton).toHaveAttribute('data-state', 'off');
-    expect(carButton).toHaveAttribute('aria-pressed', 'false');
-  });
+    // Same profile, other server — a different target, so it stays off.
+    const sameProfileElsewhere = screen.getByTestId(
+      'profile-button-local__bicycle'
+    );
+    expect(sameProfileElsewhere).toHaveAttribute('data-state', 'off');
+    expect(sameProfileElsewhere).toHaveAttribute('aria-pressed', 'false');
 
-  it('should highlight every profile in a multi-profile selection', () => {
-    selectProfiles('bicycle,car');
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
-
-    expect(screen.getByTestId('profile-button-bicycle')).toHaveAttribute(
-      'data-state',
-      'on'
-    );
-    expect(screen.getByTestId('profile-button-car')).toHaveAttribute(
-      'data-state',
-      'on'
-    );
-    expect(screen.getByTestId('profile-button-truck')).toHaveAttribute(
+    expect(screen.getByTestId('profile-button-public__car')).toHaveAttribute(
       'data-state',
       'off'
     );
   });
 
-  it('should add a profile to the selection instead of replacing it', async () => {
-    const user = userEvent.setup();
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
+  it('should highlight every target in a multi-instance selection', () => {
+    selectTargets('public:bicycle,local:car');
+    renderPicker();
+
+    expect(
+      screen.getByTestId('profile-button-public__bicycle')
+    ).toHaveAttribute('data-state', 'on');
+    expect(screen.getByTestId('profile-button-local__car')).toHaveAttribute(
+      'data-state',
+      'on'
     );
+    expect(screen.getByTestId('profile-button-public__car')).toHaveAttribute(
+      'data-state',
+      'off'
+    );
+    expect(screen.getByTestId('profile-button-local__bicycle')).toHaveAttribute(
+      'data-state',
+      'off'
+    );
+  });
 
-    await user.click(screen.getByTestId('profile-button-car'));
+  it('should treat a bare profile as belonging to the first instance', () => {
+    selectTargets('bicycle');
+    renderPicker();
 
-    expect(mockOnProfileChange).toHaveBeenCalledWith(['bicycle', 'car']);
-    // The primary profile is unchanged, so the user's tuning must survive.
-    expect(mockResetSettings).not.toHaveBeenCalled();
+    // Pre-multi-instance permalinks keep working.
+    expect(
+      screen.getByTestId('profile-button-public__bicycle')
+    ).toHaveAttribute('data-state', 'on');
+    expect(screen.getByTestId('profile-button-local__bicycle')).toHaveAttribute(
+      'data-state',
+      'off'
+    );
+  });
+
+  it('should add a target to the selection instead of replacing it', async () => {
+    const user = userEvent.setup();
+    renderPicker();
+
+    await user.click(screen.getByTestId('profile-button-public__car'));
+
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'public', profile: 'bicycle' },
+      { instanceId: 'public', profile: 'car' },
+    ]);
+  });
+
+  it('should not disturb another instances selection when picking a profile', async () => {
+    const user = userEvent.setup();
+    renderPicker();
+
+    await user.click(screen.getByTestId('profile-button-local__emergency'));
+
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'public', profile: 'bicycle' },
+      { instanceId: 'local', profile: 'emergency' },
+    ]);
+  });
+
+  it('should keep the same profile on two instances as two separate targets', async () => {
+    const user = userEvent.setup();
+    selectTargets('public:car');
+    renderPicker();
+
+    await user.click(screen.getByTestId('profile-button-local__car'));
+
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'public', profile: 'car' },
+      { instanceId: 'local', profile: 'car' },
+    ]);
   });
 
   it('should keep the selection in the pickers left-to-right order', async () => {
     const user = userEvent.setup();
-    selectProfiles('car');
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+    selectTargets('public:car');
+    renderPicker();
 
     // `bicycle` sits left of `car` in the picker, so it leads the new list.
-    await user.click(screen.getByTestId('profile-button-bicycle'));
+    await user.click(screen.getByTestId('profile-button-public__bicycle'));
 
-    expect(mockOnProfileChange).toHaveBeenCalledWith(['bicycle', 'car']);
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'public', profile: 'bicycle' },
+      { instanceId: 'public', profile: 'car' },
+    ]);
   });
 
-  it('should deselect a profile when more than one is selected', async () => {
+  it('should rebuild the selection in instance-list order', async () => {
     const user = userEvent.setup();
-    selectProfiles('bicycle,car');
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+    selectTargets('local:car');
+    renderPicker();
 
-    await user.click(screen.getByTestId('profile-button-car'));
+    await user.click(screen.getByTestId('profile-button-public__truck'));
 
-    expect(mockOnProfileChange).toHaveBeenCalledWith(['bicycle']);
-    // Dropping a comparison profile leaves the primary — and its settings — alone.
-    expect(mockResetSettings).not.toHaveBeenCalled();
+    // `public` comes first in the instance list, so it leads regardless of
+    // which row was clicked last.
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'public', profile: 'truck' },
+      { instanceId: 'local', profile: 'car' },
+    ]);
   });
 
-  it('should never reset settings — each profile keeps its own costing options', async () => {
+  it('should deselect a target when more than one is selected', async () => {
     const user = userEvent.setup();
-    selectProfiles('bicycle,car');
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+    selectTargets('public:bicycle,public:car');
+    renderPicker();
 
-    // Dropping the primary promotes `car`, which must still not wipe anything.
-    await user.click(screen.getByTestId('profile-button-bicycle'));
+    await user.click(screen.getByTestId('profile-button-public__car'));
 
-    expect(mockOnProfileChange).toHaveBeenCalledWith(['car']);
-    expect(mockResetSettings).not.toHaveBeenCalled();
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'public', profile: 'bicycle' },
+    ]);
   });
 
-  it('should not deselect the last remaining profile', async () => {
+  it('should allow clearing an instance while another instance still has a target', async () => {
     const user = userEvent.setup();
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+    selectTargets('public:bicycle,local:car');
+    renderPicker();
 
-    await user.click(screen.getByTestId('profile-button-bicycle'));
+    await user.click(screen.getByTestId('profile-button-public__bicycle'));
 
-    expect(mockResetSettings).not.toHaveBeenCalled();
-    expect(mockOnProfileChange).not.toHaveBeenCalled();
+    expect(mockOnTargetsChange).toHaveBeenCalledWith([
+      { instanceId: 'local', profile: 'car' },
+    ]);
   });
 
-  it('should render a colour swatch for each selected profile only', () => {
-    selectProfiles('bicycle,car');
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+  it('should not deselect the last remaining target across all instances', async () => {
+    const user = userEvent.setup();
+    renderPicker();
 
-    const swatchOf = (profile: string) =>
+    await user.click(screen.getByTestId('profile-button-public__bicycle'));
+
+    expect(mockOnTargetsChange).not.toHaveBeenCalled();
+  });
+
+  it('should render a colour swatch for each selected target only', () => {
+    selectTargets('public:car,local:car');
+    renderPicker();
+
+    const swatchOf = (key: string) =>
       screen
-        .getByTestId(`profile-button-${profile}`)
+        .getByTestId(`profile-button-${key}`)
         .querySelector('[aria-hidden="true"]');
 
-    expect(swatchOf('bicycle')).toHaveStyle({
-      backgroundColor: getProfileColor('bicycle'),
+    expect(swatchOf('public__car')).toHaveStyle({
+      backgroundColor: getTargetColor(0, 'car'),
     });
-    expect(swatchOf('car')).toHaveStyle({
-      backgroundColor: getProfileColor('car'),
+    // The second instance shades the same hue so the two are tellable apart.
+    expect(swatchOf('local__car')).toHaveStyle({
+      backgroundColor: getTargetColor(1, 'car'),
     });
-    expect(swatchOf('truck')).toBeNull();
+    expect(getTargetColor(1, 'car')).not.toBe(getTargetColor(0, 'car'));
+
+    expect(swatchOf('public__truck')).toBeNull();
+    expect(swatchOf('local__truck')).toBeNull();
   });
 
-  it('should hint at multi-select when a single profile is selected', () => {
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+  it('should hint at multi-select when a single target is selected', () => {
+    renderPicker();
 
     expect(
       screen.getByText(
-        'Select more than one profile to compare them side by side.'
+        'Select more profiles, on any server, to compare them side by side.'
       )
     ).toBeInTheDocument();
   });
 
-  it('should report how many profiles are being compared', () => {
-    selectProfiles('bicycle,car,truck');
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+  it('should report how many targets are being compared', () => {
+    selectTargets('public:bicycle,public:car,local:bicycle');
+    renderPicker();
 
     expect(
       screen.getByText(
-        'Comparing 3 profiles — each is routed between the same waypoints.'
+        'Comparing 3 targets — each is routed between the same waypoints.'
       )
     ).toBeInTheDocument();
   });
 
-  it('should show loading spinner on selected profiles when loading is true', () => {
-    selectProfiles('bicycle,car');
-    render(
-      <ProfilePicker loading={true} onProfileChange={mockOnProfileChange} />
-    );
+  it('should show loading spinner on selected targets when loading is true', () => {
+    selectTargets('public:bicycle,local:car');
+    renderPicker(true);
 
     expect(
       screen
-        .getByTestId('profile-button-bicycle')
+        .getByTestId('profile-button-public__bicycle')
         .querySelector('.animate-spin')
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId('profile-button-car').querySelector('.animate-spin')
+      screen
+        .getByTestId('profile-button-local__car')
+        .querySelector('.animate-spin')
     ).toBeInTheDocument();
   });
 
-  it('should not show loading spinner on unselected profiles when loading is true', () => {
-    render(
-      <ProfilePicker loading={true} onProfileChange={mockOnProfileChange} />
-    );
+  it('should not show loading spinner on unselected targets when loading is true', () => {
+    renderPicker(true);
 
-    const carButton = screen.getByTestId('profile-button-car');
-    expect(carButton.querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(
+      screen
+        .getByTestId('profile-button-public__car')
+        .querySelector('.animate-spin')
+    ).not.toBeInTheDocument();
+    // Same profile on the other server is a separate, unselected target.
+    expect(
+      screen
+        .getByTestId('profile-button-local__bicycle')
+        .querySelector('.animate-spin')
+    ).not.toBeInTheDocument();
   });
 
-  it('should have accessible labels for each profile button', () => {
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+  it('should have accessible labels naming both the profile and the instance', () => {
+    renderPicker();
 
     // ToggleGroup type="multiple" renders toggle buttons, not radios.
-    expect(
-      screen.getByRole('button', { name: 'Select Bicycle profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Pedestrian profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Car profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Truck profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Bus profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Motor Scooter profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Motorcycle profile' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Select Emergency profile' })
-    ).toBeInTheDocument();
+    for (const label of [
+      'Bicycle',
+      'Pedestrian',
+      'Car',
+      'Truck',
+      'Bus',
+      'Motor Scooter',
+      'Motorcycle',
+      'Emergency',
+    ]) {
+      expect(
+        screen.getByRole('button', {
+          name: `Select ${label} profile on Public`,
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: `Select ${label} profile on Local` })
+      ).toBeInTheDocument();
+    }
   });
 
-  it('should show tooltip on hover', async () => {
+  it('should show a tooltip naming the profile and the instance on hover', async () => {
     const user = userEvent.setup();
-    render(
-      <ProfilePicker loading={false} onProfileChange={mockOnProfileChange} />
-    );
+    renderPicker();
 
-    await user.hover(screen.getByTestId('profile-button-truck'));
+    await user.hover(screen.getByTestId('profile-button-local__truck'));
 
     expect(
-      await screen.findByRole('tooltip', { name: 'Truck' })
+      await screen.findByRole('tooltip', { name: /Truck.*Local/ })
     ).toBeInTheDocument();
   });
 });

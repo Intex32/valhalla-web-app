@@ -3,27 +3,33 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Summary } from './summary';
 import type { Summary as SummaryType } from '@/components/types';
-import { useDirectionsStore } from '@/stores/directions-store';
+import { useDirectionsStore, routeKey } from '@/stores/directions-store';
+import type { TargetRef } from '@/utils/targets';
 
 const mockToggleShowOnMap = vi.fn();
 const mockFitBounds = vi.fn();
 
 const mockResults = {
-  byProfile: [] as unknown[],
-  show: { 'car:0': true, 'car:1': false } as Record<string, boolean>,
+  byTarget: [] as unknown[],
+  failures: [] as unknown[],
+  show: {} as Record<string, boolean>,
 };
 
-vi.mock('@/stores/directions-store', () => ({
-  useDirectionsStore: vi.fn((selector) =>
-    selector({
-      results: mockResults,
-      inclineDeclineTotal: null,
-      toggleShowOnMap: mockToggleShowOnMap,
-      successful: true,
-    })
-  ),
-  routeKey: (profile: string, index: number) => `${profile}:${index}`,
-}));
+vi.mock('@/stores/directions-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/directions-store')>();
+  return {
+    ...actual,
+    useDirectionsStore: vi.fn((selector) =>
+      selector({
+        results: mockResults,
+        inclineDeclineTotal: null,
+        toggleShowOnMap: mockToggleShowOnMap,
+        successful: true,
+      })
+    ),
+  };
+});
 
 vi.mock('react-map-gl/maplibre', () => ({
   useMap: vi.fn(() => ({
@@ -41,6 +47,10 @@ vi.mock('@/stores/common-store', () => ({
     })
   ),
 }));
+
+const localCar: TargetRef = { instanceId: 'local', profile: 'car' };
+const publicCar: TargetRef = { instanceId: 'public', profile: 'car' };
+const localTruck: TargetRef = { instanceId: 'local', profile: 'truck' };
 
 const mockRouteCoordinates: number[][] = [
   [48.0, 10.0],
@@ -67,7 +77,10 @@ const createMockSummary = (
 describe('Summary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResults.show = { 'car:0': true, 'car:1': false };
+    mockResults.show = {
+      [routeKey(localCar, 0)]: true,
+      [routeKey(localCar, 1)]: false,
+    };
 
     vi.mocked(useDirectionsStore).mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,7 +107,7 @@ describe('Summary', () => {
           summary={summary}
           title="Main Route"
           index={0}
-          profile="car"
+          target={localCar}
           routeCoordinates={mockRouteCoordinates}
         />
       )
@@ -108,7 +121,7 @@ describe('Summary', () => {
         summary={summary}
         title="Main Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -123,7 +136,7 @@ describe('Summary', () => {
         summary={summary}
         title="Alternate Route #1"
         index={1}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -137,7 +150,7 @@ describe('Summary', () => {
         summary={null as unknown as SummaryType}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -152,7 +165,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -168,7 +181,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -183,7 +196,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -198,7 +211,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -213,7 +226,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -222,14 +235,14 @@ describe('Summary', () => {
   });
 
   it('should have switch unchecked when show is false', () => {
-    mockResults.show = { 'car:0': false };
+    mockResults.show = { [routeKey(localCar, 0)]: false };
     const summary = createMockSummary();
     render(
       <Summary
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -245,7 +258,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -254,6 +267,7 @@ describe('Summary', () => {
 
     expect(mockToggleShowOnMap).toHaveBeenCalledWith({
       show: false,
+      instanceId: 'local',
       profile: 'car',
       index: 0,
     });
@@ -267,31 +281,36 @@ describe('Summary', () => {
         summary={summary}
         title="Alternate"
         index={1}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
 
     await user.click(screen.getByRole('switch'));
 
-    // `car:1` starts hidden in the mocked `show` map, so toggling turns it on.
+    // The alternate starts hidden in the mocked `show` map, so toggling turns
+    // it on.
     expect(mockToggleShowOnMap).toHaveBeenCalledWith({
       show: true,
+      instanceId: 'local',
       profile: 'car',
       index: 1,
     });
   });
 
-  it('should call toggleShowOnMap with the owning profile', async () => {
+  it('should call toggleShowOnMap with the owning target', async () => {
     const user = userEvent.setup();
-    mockResults.show = { 'car:0': true, 'truck:0': true };
+    mockResults.show = {
+      [routeKey(localCar, 0)]: true,
+      [routeKey(localTruck, 0)]: true,
+    };
     const summary = createMockSummary();
     render(
       <Summary
         summary={summary}
         title="Route"
         index={0}
-        profile="truck"
+        target={localTruck}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -300,31 +319,31 @@ describe('Summary', () => {
 
     expect(mockToggleShowOnMap).toHaveBeenCalledWith({
       show: false,
+      instanceId: 'local',
       profile: 'truck',
       index: 0,
     });
   });
 
-  it('should key the switch id by profile and route index', () => {
+  it('should key the switch id by target and route index', () => {
     const summary = createMockSummary();
     render(
       <Summary
         summary={summary}
         title="Alternate"
         index={1}
-        profile="truck"
+        target={localTruck}
         routeCoordinates={mockRouteCoordinates}
       />
     );
 
     expect(screen.getByRole('switch')).toHaveAttribute(
       'id',
-      'show-on-map-truck:1'
+      'show-on-map-local__truck__1'
     );
   });
 
-  it('should read visibility per profile, not per bare index', () => {
-    mockResults.show = { 'car:0': true, 'truck:0': false };
+  it('should give the same profile on two instances different switch ids', () => {
     const summary = createMockSummary();
 
     const { unmount } = render(
@@ -332,7 +351,42 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
+        routeCoordinates={mockRouteCoordinates}
+      />
+    );
+    const localId = screen.getByRole('switch').getAttribute('id');
+    unmount();
+
+    render(
+      <Summary
+        summary={summary}
+        title="Route"
+        index={0}
+        target={publicCar}
+        routeCoordinates={mockRouteCoordinates}
+      />
+    );
+    const publicId = screen.getByRole('switch').getAttribute('id');
+
+    expect(localId).toBe('show-on-map-local__car__0');
+    expect(publicId).toBe('show-on-map-public__car__0');
+    expect(localId).not.toBe(publicId);
+  });
+
+  it('should read visibility per target, not per profile alone', () => {
+    mockResults.show = {
+      [routeKey(localCar, 0)]: true,
+      [routeKey(publicCar, 0)]: false,
+    };
+    const summary = createMockSummary();
+
+    const { unmount } = render(
+      <Summary
+        summary={summary}
+        title="Route"
+        index={0}
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -344,7 +398,67 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="truck"
+        target={publicCar}
+        routeCoordinates={mockRouteCoordinates}
+      />
+    );
+    expect(screen.getByRole('switch')).not.toBeChecked();
+  });
+
+  it('should toggle only the clicked instance when both run the same profile', async () => {
+    const user = userEvent.setup();
+    mockResults.show = {
+      [routeKey(localCar, 0)]: true,
+      [routeKey(publicCar, 0)]: true,
+    };
+    const summary = createMockSummary();
+
+    render(
+      <Summary
+        summary={summary}
+        title="Route"
+        index={0}
+        target={publicCar}
+        routeCoordinates={mockRouteCoordinates}
+      />
+    );
+
+    await user.click(screen.getByRole('switch'));
+
+    expect(mockToggleShowOnMap).toHaveBeenCalledTimes(1);
+    expect(mockToggleShowOnMap).toHaveBeenCalledWith({
+      show: false,
+      instanceId: 'public',
+      profile: 'car',
+      index: 0,
+    });
+  });
+
+  it('should read visibility per profile, not per bare index', () => {
+    mockResults.show = {
+      [routeKey(localCar, 0)]: true,
+      [routeKey(localTruck, 0)]: false,
+    };
+    const summary = createMockSummary();
+
+    const { unmount } = render(
+      <Summary
+        summary={summary}
+        title="Route"
+        index={0}
+        target={localCar}
+        routeCoordinates={mockRouteCoordinates}
+      />
+    );
+    expect(screen.getByRole('switch')).toBeChecked();
+    unmount();
+
+    render(
+      <Summary
+        summary={summary}
+        title="Route"
+        index={0}
+        target={localTruck}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -359,7 +473,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="bicycle"
+        target={{ instanceId: 'local', profile: 'bicycle' }}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -374,7 +488,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -389,7 +503,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -404,7 +518,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -423,7 +537,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -442,7 +556,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -452,7 +566,7 @@ describe('Summary', () => {
     ).toBeInTheDocument();
   });
 
-  it('should not render recenter button when successful is false', async () => {
+  it('should not render recenter button when successful is false', () => {
     vi.mocked(useDirectionsStore).mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (selector: any) =>
@@ -470,7 +584,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -488,7 +602,7 @@ describe('Summary', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -512,13 +626,13 @@ describe('Summary', () => {
     );
   });
 
-  it('should not render recenter button after route is cleared', async () => {
+  it('should not render recenter button after route is cleared', () => {
     const { rerender } = render(
       <Summary
         summary={createMockSummary()}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -543,7 +657,7 @@ describe('Summary', () => {
         summary={createMockSummary()}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );
@@ -559,7 +673,7 @@ describe('Summary with incline/decline', () => {
     vi.clearAllMocks();
   });
 
-  it('should display incline and decline when available', async () => {
+  it('should display incline and decline when available', () => {
     vi.mocked(useDirectionsStore).mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (selector: any) =>
@@ -577,7 +691,7 @@ describe('Summary with incline/decline', () => {
         summary={summary}
         title="Route"
         index={0}
-        profile="car"
+        target={localCar}
         routeCoordinates={mockRouteCoordinates}
       />
     );

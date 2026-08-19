@@ -5,6 +5,9 @@ import { QuickSettings } from '@/components/quick-settings';
 import { useIsochronesStore } from '@/stores/isochrones-store';
 import { IsochroneCard } from './isochrone-card';
 import { IsochroneVisualization } from './isochrone-visualization';
+import { InstanceResultsGroup } from '@/components/instance-results-group';
+import { useInstancesStore } from '@/stores/instances-store';
+import { targetKey } from '@/utils/targets';
 import { parseUrlParams } from '@/utils/parse-url-params';
 import { isValidCoordinates } from '@/utils/geom';
 import { useNavigate } from '@tanstack/react-router';
@@ -23,6 +26,20 @@ export const IsochronesControl = () => {
   const navigate = useNavigate({ from: '/$activeTab' });
   const { refetch: refetchIsochrones } = useIsochronesQuery();
   const { reverseGeocode } = useReverseGeocodeIsochrones();
+  const instances = useInstancesStore((state) => state.instances);
+
+  // Grouped by instance in list order, so the panel reads server by server.
+  const instanceGroups = instances
+    .map((instance) => ({
+      instance,
+      entries: results.byTarget.filter(
+        (entry) => entry.target.instanceId === instance.id
+      ),
+      failures: results.failures.filter(
+        (failure) => failure.target.instanceId === instance.id
+      ),
+    }))
+    .filter((group) => group.entries.length > 0 || group.failures.length > 0);
 
   useEffect(() => {
     if (urlParamsProcessed.current || !mainMap) return;
@@ -79,22 +96,30 @@ export const IsochronesControl = () => {
   return (
     <>
       <Waypoints />
-      <QuickSettings showAlternates={false} showLanguage={false} />
+      <QuickSettings showLanguage={false} />
       <SettingsFooter />
-      {results.byProfile.length > 0 && (
+      {instanceGroups.length > 0 && (
         <div className="flex flex-col gap-2">
           <h3 className="font-bold">Isochrones</h3>
           <IsochroneVisualization
-            multipleProfiles={results.byProfile.length > 1}
+            multipleProfiles={results.byTarget.length > 1}
           />
-          {results.byProfile.map(({ profile, data }) => (
-            <IsochroneCard
-              key={profile}
-              data={data}
-              profile={profile}
-              showOnMap={results.show[profile] ?? true}
-              showProfileLabel={results.byProfile.length > 1}
-            />
+          {instanceGroups.map(({ instance, entries, failures }) => (
+            <InstanceResultsGroup
+              key={instance.id}
+              instanceId={instance.id}
+              failures={failures}
+            >
+              {entries.map(({ target, data }) => (
+                <IsochroneCard
+                  key={targetKey(target)}
+                  data={data}
+                  target={target}
+                  showOnMap={results.show[targetKey(target)] ?? true}
+                  showProfileLabel={results.byTarget.length > 1}
+                />
+              ))}
+            </InstanceResultsGroup>
           ))}
         </div>
       )}

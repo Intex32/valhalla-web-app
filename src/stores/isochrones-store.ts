@@ -5,21 +5,31 @@ import type {
   ActiveWaypoint,
   ValhallaIsochroneResponse,
 } from '@/components/types';
-import type { Profile } from '@/stores/common-store';
+import { targetKey, type TargetRef } from '@/utils/targets';
 import type { PaletteId } from '@/utils/isochrone-palettes';
 import { DEFAULT_OPACITY } from '@/utils/isochrone-palettes';
 
-/** One Valhalla `/isochrone` response, tagged with the profile it came from. */
-export interface ProfileIsochroneResult {
-  profile: Profile;
+/** One Valhalla `/isochrone` response, tagged with the target it came from. */
+export interface TargetIsochroneResult {
+  target: TargetRef;
   data: ValhallaIsochroneResponse;
 }
 
+/** Why a selected target produced no contours. */
+export interface TargetIsochroneFailure {
+  target: TargetRef;
+  /** `unsupported` means the server has no such costing model (error_code 125). */
+  kind: 'unsupported' | 'error';
+  message: string;
+}
+
 interface IsochroneResults {
-  /** One entry per selected profile that returned contours, in selection order. */
-  byProfile: ProfileIsochroneResult[];
-  /** Per-profile map visibility. */
-  show: Partial<Record<Profile, boolean>>;
+  /** One entry per target that returned contours, in selection order. */
+  byTarget: TargetIsochroneResult[];
+  /** Targets that returned nothing, so the panel can explain the gap. */
+  failures: TargetIsochroneFailure[];
+  /** Per-target map visibility, keyed by {@link targetKey}. */
+  show: Record<string, boolean>;
 }
 
 interface IsochroneState {
@@ -38,8 +48,11 @@ interface IsochroneState {
 
 interface IsochroneActions {
   clearIsos: () => void;
-  toggleShowOnMap: (params: { profile: Profile; show: boolean }) => void;
-  receiveIsochroneResults: (results: ProfileIsochroneResult[]) => void;
+  toggleShowOnMap: (params: { target: TargetRef; show: boolean }) => void;
+  receiveIsochroneResults: (params: {
+    results: TargetIsochroneResult[];
+    failures?: TargetIsochroneFailure[];
+  }) => void;
   updateTextInput: (params: {
     userInput: string;
     addressIndex?: number;
@@ -68,7 +81,7 @@ export const useIsochronesStore = create<IsochroneStore>()(
       interval: 10,
       denoise: 0.1,
       generalize: 0,
-      results: { byProfile: [], show: {} },
+      results: { byTarget: [], failures: [], show: {} },
       colorPalette: 'default',
       opacity: DEFAULT_OPACITY,
 
@@ -79,29 +92,29 @@ export const useIsochronesStore = create<IsochroneStore>()(
             state.userInput = '';
             state.geocodeResults = [];
             state.selectedAddress = null;
-            state.results = { byProfile: [], show: {} };
+            state.results = { byTarget: [], failures: [], show: {} };
           },
           undefined,
           'clearIsos'
         ),
 
-      toggleShowOnMap: ({ profile, show }) =>
+      toggleShowOnMap: ({ target, show }) =>
         set(
           (state) => {
-            state.results.show[profile] = show;
+            state.results.show[targetKey(target)] = show;
           },
           undefined,
           'toggleShowOnMap'
         ),
 
-      receiveIsochroneResults: (results) =>
+      receiveIsochroneResults: ({ results, failures = [] }) =>
         set(
           (state) => {
-            const show: Partial<Record<Profile, boolean>> = {};
-            for (const { profile } of results) show[profile] = true;
+            const show: Record<string, boolean> = {};
+            for (const { target } of results) show[targetKey(target)] = true;
 
             state.successful = results.length > 0;
-            state.results = { byProfile: results, show };
+            state.results = { byTarget: results, failures, show };
           },
           undefined,
           'receiveIsochroneResults'

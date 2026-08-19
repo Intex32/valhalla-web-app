@@ -7,7 +7,7 @@ import type {
   ValhallaRouteResponse,
 } from '@/components/types';
 import {
-  getValhallaUrl,
+  getInstanceUrl,
   buildDirectionsRequest,
   parseDirectionsGeometry,
   showValhallaWarnings,
@@ -15,29 +15,51 @@ import {
 } from '@/utils/valhalla';
 import { forward_geocode, parseGeocodeResponse } from '@/utils/nominatim';
 import { buildCostingOptions } from '@/utils/build-costing-options';
+import {
+  classifyValhallaError,
+  toRequestError,
+  ValhallaError,
+} from '@/utils/valhalla-errors';
 import { getDirectionsLanguage } from '@/utils/directions-language';
-import { useCommonStore, type Profile } from '@/stores/common-store';
+import { useCommonStore, getTargetScope } from '@/stores/common-store';
 import {
   useDirectionsStore,
-  type ProfileRouteResult,
+  type TargetFailure,
+  type TargetRouteResult,
   type Waypoint,
 } from '@/stores/directions-store';
-import { getProfileLabel, parseProfilesWithFallback } from '@/utils/profiles';
+import { useInstancesStore } from '@/stores/instances-store';
+import { readSelectedTargets } from '@/hooks/use-selected-targets';
+import { getProfileLabel } from '@/utils/profiles';
+import type { TargetRef } from '@/utils/targets';
 import { router } from '@/routes';
 
-const getActiveWaypoints = (waypoints: Waypoint[]): ActiveWaypoint[] =>
+/** Human label for a target, used in toasts and banners. */
+export const describeTarget = ({ instanceId, profile }: TargetRef): string => {
+  const instance = useInstancesStore
+    .getState()
+    .instances.find((candidate) => candidate.id === instanceId);
+  return `${instance?.label ?? instanceId} · ${getProfileLabel(profile)}`;
+};
+
+/** Exported so the coordinate export uses exactly what the requests use. */
+export const getActiveWaypoints = (waypoints: Waypoint[]): ActiveWaypoint[] =>
   waypoints.flatMap((wp) => wp.geocodeResults.filter((r) => r.selected));
 
-async function fetchDirectionsForProfile(
-  profile: Profile,
+async function fetchDirectionsForTarget(
+  target: TargetRef,
   activeWaypoints: ActiveWaypoint[]
 ): Promise<ParsedDirectionsGeometry> {
-  const { dateTime, shared, perProfile } = useCommonStore.getState();
-  const settings = buildCostingOptions(profile, { shared, perProfile });
+  const { dateTime, perTarget, excludePolygons } = useCommonStore.getState();
+  const settings = buildCostingOptions(
+    target.profile,
+    getTargetScope(perTarget, target),
+    excludePolygons
+  );
   const language = getDirectionsLanguage();
 
   const valhallaRequest = buildDirectionsRequest({
-    profile,
+    profile: target.profile,
     activeWaypoints,
     // @ts-expect-error todo: initial settings and filtered settings types mismatch
     settings,
@@ -48,23 +70,30 @@ async function fetchDirectionsForProfile(
     json: JSON.stringify(valhallaRequest.json),
   });
 
-  const response = await fetch(`${getValhallaUrl()}/route?${params}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...VALHALLA_CLIENT_HEADERS,
-    },
-  });
+  const response = await fetch(
+    `${getInstanceUrl(target.instanceId)}/route?${params.toString()}`,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...VALHALLA_CLIENT_HEADERS,
+      },
+    }
+  );
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    let error_msg = errorData.error || 'Could not fetch resource';
+    const errorData: { error_code?: number; error?: string } | null =
+      await response.json().catch(() => null);
+    const classified = classifyValhallaError(
+      errorData,
+      'Could not fetch resource'
+    );
 
     // Append context for route-specific error
-    if (errorData.error_code === 154) {
-      error_msg += ` for route.`;
+    if (errorData?.error_code === 154) {
+      classified.message += ` for route.`;
     }
 
-    throw new Error(error_msg);
+    throw new ValhallaError(classified);
   }
 
   const data: ValhallaRouteResponse = await response.json();
@@ -81,21 +110,23 @@ async function fetchDirectionsForProfile(
     }
   });
 
-  showValhallaWarnings(data.trip.warnings);
+  showValhallaWarnings(data.trip.warnings, describeTarget(target));
 
   return data as ParsedDirectionsGeometry;
 }
 
 /**
- * Routes every selected profile between the same waypoints. Profiles are
- * requested concurrently and settled independently, so one costing model the
- * server rejects doesn't hide the routes that did come back.
+ * Routes every selected target — one costing profile on one Valhalla instance —
+ * between the same waypoints. Targets are requested concurrently and settled
+ * independently, so a server that lacks a costing model doesn't hide the ones
+ * that answered.
  */
-async function fetchDirections(): Promise<ProfileRouteResult[] | null> {
+async function fetchDirections(): Promise<{
+  results: TargetRouteResult[];
+  failures: TargetFailure[];
+} | null> {
   const waypoints = useDirectionsStore.getState().waypoints;
-  const profiles = parseProfilesWithFallback(
-    router.state.location.search.profile
-  );
+  const targets = readSelectedTargets(router.state.location.search.profile);
 
   const activeWaypoints = getActiveWaypoints(waypoints);
   if (activeWaypoints.length < 2) {
@@ -103,34 +134,41 @@ async function fetchDirections(): Promise<ProfileRouteResult[] | null> {
   }
 
   const settled = await Promise.allSettled(
-    profiles.map((profile) =>
-      fetchDirectionsForProfile(profile, activeWaypoints)
-    )
+    targets.map((target) => fetchDirectionsForTarget(target, activeWaypoints))
   );
 
-  const results: ProfileRouteResult[] = [];
-  const failures: string[] = [];
+  const results: TargetRouteResult[] = [];
+  const failures: TargetFailure[] = [];
 
+  // Positional correspondence with `targets` is what attributes each failure to
+  // the right instance — keep the index, don't re-derive it from the outcome.
   settled.forEach((outcome, i) => {
-    const profile = profiles[i]!;
+    const target = targets[i]!;
     if (outcome.status === 'fulfilled') {
-      results.push({ profile, data: outcome.value });
+      results.push({ target, data: outcome.value });
     } else {
-      const reason =
-        outcome.reason instanceof Error
-          ? outcome.reason.message
-          : 'Could not fetch resource';
-      failures.push(`${getProfileLabel(profile)}: ${reason}`);
+      const { kind, message } = toRequestError(
+        outcome.reason,
+        'Could not fetch resource'
+      );
+      failures.push({ target, kind, message });
     }
   });
 
-  if (failures.length > 0) {
+  // An unsupported costing model gets an inline banner in the results list, so
+  // only genuine errors are worth interrupting with a toast.
+  const errors = failures.filter((failure) => failure.kind === 'error');
+  if (errors.length > 0) {
     toast.warning(
-      failures.length === profiles.length
+      results.length === 0
         ? 'No routes could be calculated'
-        : 'Some profiles returned no route',
+        : 'Some targets returned no route',
       {
-        description: failures.join('\n'),
+        description: errors
+          .map(
+            (failure) => `${describeTarget(failure.target)}: ${failure.message}`
+          )
+          .join('\n'),
         position: 'bottom-center',
         duration: 5000,
         closeButton: true,
@@ -138,11 +176,7 @@ async function fetchDirections(): Promise<ProfileRouteResult[] | null> {
     );
   }
 
-  if (results.length === 0) {
-    throw new Error(failures[0] ?? 'Could not fetch resource');
-  }
-
-  return results;
+  return { results, failures };
 }
 
 export function useDirectionsQuery() {
@@ -158,13 +192,15 @@ export function useDirectionsQuery() {
     queryFn: async () => {
       showLoading(true);
       try {
-        const results = await fetchDirections();
-        if (results) {
-          receiveRouteResults({ results });
-          // Fit every profile's route, not just the first one.
-          zoomTo(results.flatMap((result) => result.data.decodedGeometry));
+        const outcome = await fetchDirections();
+        if (outcome) {
+          receiveRouteResults(outcome);
+          // Fit every target's route, not just the first one.
+          zoomTo(
+            outcome.results.flatMap((result) => result.data.decodedGeometry)
+          );
         }
-        return results;
+        return outcome;
       } catch (error) {
         clearRoutes();
         throw error;

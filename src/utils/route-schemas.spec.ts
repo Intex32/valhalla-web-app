@@ -4,7 +4,7 @@ import { searchParamsSchema, isValidTab } from './route-schemas';
 describe('route-schemas', () => {
   describe('searchParamsSchema', () => {
     describe('profile field', () => {
-      it('should accept valid profile values', () => {
+      it('should accept a single bare profile (pre-multi-instance permalinks)', () => {
         const validProfiles = [
           'auto',
           'bicycle',
@@ -19,14 +19,57 @@ describe('route-schemas', () => {
         }
       });
 
+      it('should accept an instance-qualified target list', () => {
+        const profile = 'public:car,local:emergency';
+        expect(searchParamsSchema.parse({ profile }).profile).toBe(profile);
+      });
+
+      it('should accept the same profile on two instances', () => {
+        const profile = 'public:car,local:car';
+        expect(searchParamsSchema.parse({ profile }).profile).toBe(profile);
+      });
+
+      it('should accept a list mixing bare and qualified entries', () => {
+        const profile = 'car,public:bicycle';
+        expect(searchParamsSchema.parse({ profile }).profile).toBe(profile);
+      });
+
+      it('should keep the raw string, leaving validation to parseTargets', () => {
+        // The schema only guards "is a non-empty string"; unknown instances and
+        // costing models are dropped later by `parseTargets`, which is the only
+        // place that knows which instances exist.
+        expect(searchParamsSchema.parse({ profile: 'nope:nope' }).profile).toBe(
+          'nope:nope'
+        );
+      });
+
       it('should allow undefined profile (fallback applied by router)', () => {
         const result = searchParamsSchema.parse({});
         expect(result.profile).toBeUndefined();
       });
 
-      it('should fallback to bicycle for invalid profile values', () => {
-        const result = searchParamsSchema.parse({ profile: 'invalid' });
-        expect(result.profile).toBe('bicycle');
+      it('should fallback to bicycle for an empty or non-string profile', () => {
+        expect(searchParamsSchema.parse({ profile: '' }).profile).toBe(
+          'bicycle'
+        );
+        expect(searchParamsSchema.parse({ profile: 42 }).profile).toBe(
+          'bicycle'
+        );
+      });
+    });
+
+    describe('per-target costing params', () => {
+      it('should not carry costing options any more', () => {
+        // use_ferry / use_highways / use_tolls / alternates are per target now
+        // and live in the advanced panel, not the URL.
+        const result = searchParamsSchema.parse({
+          use_ferry: 0.5,
+          use_highways: 1,
+          use_tolls: 0,
+          alternates: 3,
+        });
+
+        expect(result).toEqual({});
       });
     });
 
@@ -84,52 +127,20 @@ describe('route-schemas', () => {
       });
     });
 
-    describe('willingness fields', () => {
-      const params = ['use_ferry', 'use_highways', 'use_tolls'] as const;
-
-      it('should accept the values the quick-settings buttons produce', () => {
-        for (const param of params) {
-          for (const value of [0, 0.5, 1]) {
-            expect(searchParamsSchema.parse({ [param]: value })[param]).toBe(
-              value
-            );
-          }
-        }
+    describe('lang field', () => {
+      it('should accept a supported language tag', () => {
+        expect(searchParamsSchema.parse({ lang: 'de-DE' }).lang).toBe('de-DE');
       });
 
-      it('should accept any 0.1 step the advanced sliders can land on', () => {
-        for (const param of params) {
-          for (const value of [0.1, 0.3, 0.7, 0.9]) {
-            expect(searchParamsSchema.parse({ [param]: value })[param]).toBe(
-              value
-            );
-          }
-        }
-      });
-
-      it('should drop out-of-range values instead of throwing', () => {
-        for (const param of params) {
-          expect(
-            searchParamsSchema.parse({ [param]: 1.5 })[param]
-          ).toBeUndefined();
-          expect(
-            searchParamsSchema.parse({ [param]: -1 })[param]
-          ).toBeUndefined();
-        }
-      });
-
-      it('should drop an out-of-range alternates instead of throwing', () => {
-        expect(
-          searchParamsSchema.parse({ alternates: 99 }).alternates
-        ).toBeUndefined();
-        expect(searchParamsSchema.parse({ alternates: 3 }).alternates).toBe(3);
+      it('should reject an unsupported language tag', () => {
+        expect(() => searchParamsSchema.parse({ lang: 'xx-XX' })).toThrow();
       });
     });
 
     describe('combined params', () => {
       it('should parse complete valid search params', () => {
         const params = {
-          profile: 'auto',
+          profile: 'public:car,local:emergency',
           wps: '12.34,56.78',
           range: 30,
           interval: 15,

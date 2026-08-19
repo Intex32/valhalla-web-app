@@ -21,14 +21,41 @@ import {
   getValhallaSourceSpec,
 } from './valhalla-layers';
 
-vi.mock('@/utils/base-url', () => ({
-  getBaseUrl: vi.fn(() => 'https://valhalla.example.com'),
-  normalizeBaseUrl: vi.fn((url: string) => url.replace(/\/$/, '')),
-}));
+import type { ValhallaInstance } from '@/stores/instances-store';
+
+const PRIMARY: ValhallaInstance = {
+  id: 'primary',
+  label: 'Primary',
+  url: 'https://valhalla.example.com',
+};
+const SECONDARY: ValhallaInstance = {
+  id: 'secondary',
+  label: 'Secondary',
+  url: 'https://other.example.com',
+};
+
+/** Mutated per test — the tiles tab always inspects `instances[0]`. */
+let instances: ValhallaInstance[] = [PRIMARY, SECONDARY];
+
+// Only the store hook is stubbed; findInstance/instanceIndex and the URL
+// helpers stay real so the tile URL is assembled exactly as in the app.
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+
+  return {
+    ...actual,
+    useInstancesStore: Object.assign(
+      vi.fn((selector: (state: unknown) => unknown) => selector({ instances })),
+      { getState: () => ({ instances }) }
+    ),
+  };
+});
 
 describe('valhalla-layers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    instances = [PRIMARY, SECONDARY];
   });
 
   describe('constants', () => {
@@ -247,6 +274,26 @@ describe('valhalla-layers', () => {
         '%7B%22verbose%22%3A%20true%2C%20%22tile%22%3A%7B%22z%22%3A{z}%2C%22x%22%3A{x}%2C%22y%22%3A{y}%7D%7D';
 
       expect(url).toContain(expectedEncoded);
+    });
+
+    it('should resolve the first instance, not the second', () => {
+      expect(getValhallaTileUrl()).not.toContain(SECONDARY.url);
+    });
+
+    it('should follow the instance list when the first instance changes', () => {
+      instances = [SECONDARY, PRIMARY];
+
+      expect(getValhallaTileUrl()).toContain(
+        'https://other.example.com/tile?json='
+      );
+    });
+
+    it('should strip a trailing slash from the instance URL', () => {
+      instances = [{ ...PRIMARY, url: 'https://valhalla.example.com/' }];
+
+      expect(getValhallaTileUrl()).toContain(
+        'https://valhalla.example.com/tile?json='
+      );
     });
   });
 

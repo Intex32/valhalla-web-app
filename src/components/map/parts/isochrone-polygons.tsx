@@ -1,27 +1,32 @@
 import { useMemo } from 'react';
 import { Source, Layer } from 'react-map-gl/maplibre';
 import { useIsochronesStore } from '@/stores/isochrones-store';
+import { useInstancesStore, instanceIndex } from '@/stores/instances-store';
 import type { Feature, FeatureCollection } from 'geojson';
 import {
   ISOCHRONE_PALETTES,
   getPaletteColor,
 } from '@/utils/isochrone-palettes';
-import {
-  getProfileColor,
-  getProfileContourColor,
-} from '@/utils/profile-colors';
+import { getTargetColor, getTargetContourColor } from '@/utils/profile-colors';
+import { targetKey } from '@/utils/targets';
 
 export function IsochronePolygons() {
   const isoResults = useIsochronesStore((state) => state.results);
   const isoSuccessful = useIsochronesStore((state) => state.successful);
   const colorPalette = useIsochronesStore((state) => state.colorPalette);
   const opacity = useIsochronesStore((state) => state.opacity);
+  const instances = useInstancesStore((state) => state.instances);
 
   const data = useMemo(() => {
     if (!isoSuccessful) return null;
 
-    const visible = isoResults.byProfile.filter(
-      ({ profile }) => isoResults.show[profile] !== false
+    // Drop targets whose instance has since been removed — they would keep
+    // drawing and be recoloured as instance 0.
+    const known = new Set(instances.map((instance) => instance.id));
+    const visible = isoResults.byTarget.filter(
+      ({ target }) =>
+        known.has(target.instanceId) &&
+        isoResults.show[targetKey(target)] !== false
     );
     if (visible.length === 0) return null;
 
@@ -30,16 +35,19 @@ export function IsochronePolygons() {
       ISOCHRONE_PALETTES[0];
     const paletteColors = palette?.colors ?? null;
 
-    // Comparing profiles means hue has to encode the profile, so the palette
-    // (and Valhalla's own contour colours) give way to a per-profile ramp.
-    // Keyed off how many profiles were *routed*, not how many are currently
+    // Comparing targets means hue has to encode the target, so the palette
+    // (and Valhalla's own contour colours) give way to a per-target ramp.
+    // Keyed off how many targets were *routed*, not how many are currently
     // visible, so hiding one doesn't recolour the ones left on the map — they
     // have to keep matching the colour key in their cards.
-    const colorByProfile = isoResults.byProfile.length > 1;
+    const colorByTarget =
+      isoResults.byTarget.filter((entry) => known.has(entry.target.instanceId))
+        .length > 1;
 
     const features: Feature[] = [];
 
-    for (const { profile, data: response } of visible) {
+    for (const { target, data: response } of visible) {
+      const index = instanceIndex(instances, target.instanceId);
       const polygons = response.features.filter((f) =>
         ['Polygon', 'MultiPolygon'].includes(f.geometry.type)
       );
@@ -55,9 +63,9 @@ export function IsochronePolygons() {
         const t = actualMax > 0 ? contour / actualMax : 1;
 
         // `fill` may already be set by Valhalla — only override it when the
-        // profile ramp or a user-selected palette should win.
-        const fill = colorByProfile
-          ? getProfileContourColor(profile, t)
+        // target ramp or a user-selected palette should win.
+        const fill = colorByTarget
+          ? getTargetContourColor(index, target.profile, t)
           : paletteColors
             ? getPaletteColor(paletteColors, t)
             : feature.properties?.fill;
@@ -66,9 +74,12 @@ export function IsochronePolygons() {
           ...feature,
           properties: {
             ...feature.properties,
-            profile,
+            instanceId: target.instanceId,
+            profile: target.profile,
             fill,
-            outline: colorByProfile ? getProfileColor(profile) : '#fff',
+            outline: colorByTarget
+              ? getTargetColor(index, target.profile)
+              : '#fff',
           },
         });
       }
@@ -78,7 +89,7 @@ export function IsochronePolygons() {
       type: 'FeatureCollection',
       features,
     } as FeatureCollection;
-  }, [isoResults, isoSuccessful, colorPalette]);
+  }, [isoResults, isoSuccessful, colorPalette, instances]);
 
   if (!data) return null;
 

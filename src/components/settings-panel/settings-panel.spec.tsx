@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ScopedSettings } from '@/stores/common-store';
+import type { ValhallaInstance } from '@/stores/instances-store';
 import { SettingsPanel } from './settings-panel';
 
 const createTestQueryClient = () =>
@@ -23,52 +25,88 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
   );
 };
 
-const mockUpdateSharedSetting = vi.fn();
-const mockSetSharedEnabled = vi.fn();
-const mockUpdateProfileSetting = vi.fn();
-const mockSetProfileEnabled = vi.fn();
+const mockUpdateTargetSetting = vi.fn();
+const mockSetTargetEnabled = vi.fn();
+const mockSetUseGeocoding = vi.fn();
 const mockResetSettings = vi.fn();
 const mockToggleSettings = vi.fn();
 const mockRefetchDirections = vi.fn();
 const mockRefetchIsochrones = vi.fn();
 
 const mockUseParams = vi.fn(() => ({ activeTab: 'directions' }));
-const mockUseSearch = vi.fn(() => ({ profile: 'bicycle' }));
+const mockUseSearch = vi.fn(() => ({ profile: 'public:bicycle' }));
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => mockUseParams(),
   useSearch: () => mockUseSearch(),
 }));
 
-/** Options the user has opted into sending; empty means "all server defaults". */
-const enabledShared: Record<string, boolean> = {};
-const enabledPerProfile: Record<string, Record<string, boolean>> = {};
+const PUBLIC_INSTANCE: ValhallaInstance = {
+  id: 'public',
+  label: 'Public',
+  url: 'https://valhalla1.openstreetmap.de',
+};
+const LOCAL_INSTANCE: ValhallaInstance = {
+  id: 'local',
+  label: 'Local',
+  url: 'http://localhost:8002',
+};
 
-// Only `useCommonStore` is stubbed — getProfileScope and the seeds stay real so
+/** Mutated per test — the panel renders one section per selected target. */
+let instances: ValhallaInstance[] = [PUBLIC_INSTANCE, LOCAL_INSTANCE];
+
+/**
+ * Scopes the user has actually touched, keyed by targetKey. A target missing
+ * from here falls through to the store's own seed, which is how a freshly
+ * opened panel looks: every option present but unticked.
+ */
+const perTarget: Record<string, ScopedSettings> = {};
+
+const targetRef = (instanceId: string, profile: string) => ({
+  instanceId,
+  profile,
+});
+
+// Only `useCommonStore` is stubbed — getTargetScope and the seeds stay real so
 // the panel renders the same values it would in the app.
 vi.mock('@/stores/common-store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/common-store')>();
-  const { settingsInit } = await import('./settings-options');
 
   return {
     ...actual,
     useCommonStore: vi.fn((selector: (state: unknown) => unknown) =>
       selector({
-        shared: { values: { ...settingsInit }, enabled: enabledShared },
-        perProfile: Object.fromEntries(
-          Object.entries(enabledPerProfile).map(([profile, enabled]) => [
-            profile,
-            { values: { ...settingsInit }, enabled },
-          ])
-        ),
+        perTarget,
+        excludePolygons: [],
+        useGeocoding: true,
         settingsPanelOpen: true,
-        updateSharedSetting: mockUpdateSharedSetting,
-        setSharedEnabled: mockSetSharedEnabled,
-        updateProfileSetting: mockUpdateProfileSetting,
-        setProfileEnabled: mockSetProfileEnabled,
+        updateTargetSetting: mockUpdateTargetSetting,
+        setTargetEnabled: mockSetTargetEnabled,
+        setUseGeocoding: mockSetUseGeocoding,
         resetSettings: mockResetSettings,
         toggleSettings: mockToggleSettings,
       })
+    ),
+  };
+});
+
+// instanceIndex / findInstance stay real — the section colours depend on them.
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+
+  return {
+    ...actual,
+    useInstancesStore: Object.assign(
+      vi.fn((selector: (state: unknown) => unknown) =>
+        selector({
+          instances,
+          addInstance: vi.fn(),
+          updateInstance: vi.fn(),
+          removeInstance: vi.fn(),
+        })
+      ),
+      { getState: () => ({ instances }) }
     ),
   };
 });
@@ -85,7 +123,14 @@ vi.mock('@/hooks/use-isochrones-queries', () => ({
   })),
 }));
 
-const BASE_URL_STORAGE_KEY = 'valhalla_base_url';
+/** Marks options as opted-in for a target without touching its values. */
+const enableFor = async (targetKeyString: string, params: string[]) => {
+  const { settingsInit } = await import('./settings-options');
+  perTarget[targetKeyString] = {
+    values: { ...settingsInit, alternates: 0 },
+    enabled: Object.fromEntries(params.map((param) => [param, true])),
+  };
+};
 
 describe('SettingsPanel', () => {
   const originalNavigator = global.navigator;
@@ -93,11 +138,10 @@ describe('SettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    for (const key of Object.keys(enabledShared)) delete enabledShared[key];
-    for (const key of Object.keys(enabledPerProfile))
-      delete enabledPerProfile[key];
+    for (const key of Object.keys(perTarget)) delete perTarget[key];
+    instances = [PUBLIC_INSTANCE, LOCAL_INSTANCE];
     mockUseParams.mockReturnValue({ activeTab: 'directions' });
-    mockUseSearch.mockReturnValue({ profile: 'bicycle' });
+    mockUseSearch.mockReturnValue({ profile: 'public:bicycle' });
     vi.stubGlobal('navigator', { ...originalNavigator, language: 'en-US' });
   });
 
@@ -130,28 +174,56 @@ describe('SettingsPanel', () => {
     expect(mockToggleSettings).toHaveBeenCalled();
   });
 
-  it('should render the shared settings section', () => {
+  it('should title the section with the instance and the profile', () => {
     renderWithQueryClient(<SettingsPanel />);
-    expect(screen.getByText('Shared settings')).toBeInTheDocument();
+    expect(screen.getByText('Public · Bicycle')).toBeInTheDocument();
   });
 
-  it('should render one section per selected profile', () => {
-    mockUseSearch.mockReturnValue({ profile: 'car,emergency' });
+  it('should not render a shared section any more', () => {
     renderWithQueryClient(<SettingsPanel />);
-
-    expect(screen.getByText('Car settings')).toBeInTheDocument();
-    expect(screen.getByText('Emergency settings')).toBeInTheDocument();
-    expect(screen.queryByText('Bicycle settings')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shared settings')).not.toBeInTheDocument();
   });
 
-  it('should tag each profile section so it can be styled per profile', () => {
-    mockUseSearch.mockReturnValue({ profile: 'car,emergency' });
+  it('should render one section per selected target', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,public:emergency' });
     renderWithQueryClient(<SettingsPanel />);
 
-    expect(screen.getByTestId('profile-settings-car')).toBeInTheDocument();
+    expect(screen.getByText('Public · Car')).toBeInTheDocument();
+    expect(screen.getByText('Public · Emergency')).toBeInTheDocument();
+    expect(screen.queryByText('Public · Bicycle')).not.toBeInTheDocument();
+  });
+
+  it('should give the same profile on two instances a section each', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    renderWithQueryClient(<SettingsPanel />);
+
+    expect(screen.getByText('Public · Car')).toBeInTheDocument();
+    expect(screen.getByText('Local · Car')).toBeInTheDocument();
+  });
+
+  it('should tag each target section so it can be styled per target', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    renderWithQueryClient(<SettingsPanel />);
+
     expect(
-      screen.getByTestId('profile-settings-emergency')
+      screen.getByTestId('target-settings-public__car')
     ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('target-settings-local__car')
+    ).toBeInTheDocument();
+  });
+
+  it('should drop a target whose instance has been removed', () => {
+    instances = [PUBLIC_INSTANCE];
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    renderWithQueryClient(<SettingsPanel />);
+
+    expect(
+      screen.getByTestId('target-settings-public__car')
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('target-settings-local__car')
+    ).not.toBeInTheDocument();
   });
 
   it('should explain that unticked options fall back to the server', () => {
@@ -175,7 +247,7 @@ describe('SettingsPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it("should render a profile's own options in its own section", () => {
+  it("should render a profile's own options in its target section", () => {
     renderWithQueryClient(<SettingsPanel />);
 
     expect(screen.getByText('Cycling Speed')).toBeInTheDocument();
@@ -186,7 +258,7 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('Bicycle Type')).toBeInTheDocument();
   });
 
-  it('should render the general options in the shared section', () => {
+  it("should render the profile's general options in the same section", () => {
     renderWithQueryClient(<SettingsPanel />);
 
     expect(screen.getByText('Use Living Streets')).toBeInTheDocument();
@@ -194,112 +266,196 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('Service Penalty')).toBeInTheDocument();
   });
 
-  it('should offer the turn penalty in the shared section, exactly once', () => {
+  it('should offer the turn penalty exactly once per target', () => {
     renderWithQueryClient(<SettingsPanel />);
 
     // maneuver_penalty is a general option; it used to be shadowed by a
-    // per-profile duplicate labelled "Maneuver Penalty" and vanish from here.
+    // per-profile duplicate labelled "Maneuver Penalty" and vanish entirely.
     expect(screen.getByText('Turn Penalty')).toBeInTheDocument();
-    expect(screen.getByTestId('include-maneuver_penalty')).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId('include-public__bicycle-maneuver_penalty')
+    ).toHaveLength(1);
     expect(screen.queryByText('Maneuver Penalty')).not.toBeInTheDocument();
   });
 
-  it('should keep the turn penalty in the shared section for several profiles', () => {
-    mockUseSearch.mockReturnValue({ profile: 'car,emergency' });
+  it('should give every selected target its own turn penalty checkbox', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,public:emergency' });
     renderWithQueryClient(<SettingsPanel />);
 
-    expect(screen.getAllByTestId('include-maneuver_penalty')).toHaveLength(1);
+    expect(
+      screen.getByTestId('include-public__car-maneuver_penalty')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('include-public__emergency-maneuver_penalty')
+    ).toBeInTheDocument();
   });
 
   it('should render an include checkbox for every costing option', () => {
     renderWithQueryClient(<SettingsPanel />);
 
-    expect(screen.getByTestId('include-cycling_speed')).toBeInTheDocument();
-    expect(screen.getByTestId('include-shortest')).toBeInTheDocument();
-    expect(screen.getByTestId('include-bicycle_type')).toBeInTheDocument();
-    expect(screen.getByTestId('include-use_ferry')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('include-public__bicycle-cycling_speed')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('include-public__bicycle-shortest')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('include-public__bicycle-bicycle_type')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('include-public__bicycle-use_ferry')
+    ).toBeInTheDocument();
   });
 
   it('should leave request-level params out of the checkbox list', () => {
     renderWithQueryClient(<SettingsPanel />);
-    expect(screen.queryByTestId('include-alternates')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('include-public__bicycle-alternates')
+    ).not.toBeInTheDocument();
+  });
+
+  it('should give each target its own alternates slider', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    renderWithQueryClient(<SettingsPanel />);
+
+    expect(screen.getAllByText('Alternative routes')).toHaveLength(2);
+    expect(document.getElementById('alternates-public__car')).not.toBeNull();
+    expect(document.getElementById('alternates-local__car')).not.toBeNull();
   });
 
   it('should start every option unticked so the server defaults apply', () => {
     renderWithQueryClient(<SettingsPanel />);
-    expect(screen.getByTestId('include-cycling_speed')).not.toBeChecked();
-    expect(screen.getByTestId('include-use_ferry')).not.toBeChecked();
+    expect(
+      screen.getByTestId('include-public__bicycle-cycling_speed')
+    ).not.toBeChecked();
+    expect(
+      screen.getByTestId('include-public__bicycle-use_ferry')
+    ).not.toBeChecked();
   });
 
-  it('should opt a profile option in when its checkbox is ticked', async () => {
+  it("should opt a profile's own option in when its checkbox is ticked", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SettingsPanel />);
 
-    await user.click(screen.getByTestId('include-cycling_speed'));
+    await user.click(
+      screen.getByTestId('include-public__bicycle-cycling_speed')
+    );
 
-    expect(mockSetProfileEnabled).toHaveBeenCalledWith(
-      'bicycle',
+    expect(mockSetTargetEnabled).toHaveBeenCalledWith(
+      targetRef('public', 'bicycle'),
       'cycling_speed',
       true
     );
     expect(mockRefetchDirections).toHaveBeenCalled();
   });
 
-  it('should opt a shared option in when its checkbox is ticked', async () => {
+  it('should opt a general option in when its checkbox is ticked', async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SettingsPanel />);
 
-    await user.click(screen.getByTestId('include-use_ferry'));
+    await user.click(screen.getByTestId('include-public__bicycle-use_ferry'));
 
-    expect(mockSetSharedEnabled).toHaveBeenCalledWith('use_ferry', true);
+    expect(mockSetTargetEnabled).toHaveBeenCalledWith(
+      targetRef('public', 'bicycle'),
+      'use_ferry',
+      true
+    );
     expect(mockRefetchDirections).toHaveBeenCalled();
   });
 
   it('should opt an option back out when its checkbox is unticked', async () => {
     const user = userEvent.setup();
-    enabledPerProfile.bicycle = { cycling_speed: true };
+    await enableFor('public__bicycle', ['cycling_speed']);
     renderWithQueryClient(<SettingsPanel />);
 
-    expect(screen.getByTestId('include-cycling_speed')).toBeChecked();
-    await user.click(screen.getByTestId('include-cycling_speed'));
+    expect(
+      screen.getByTestId('include-public__bicycle-cycling_speed')
+    ).toBeChecked();
+    await user.click(
+      screen.getByTestId('include-public__bicycle-cycling_speed')
+    );
 
-    expect(mockSetProfileEnabled).toHaveBeenCalledWith(
-      'bicycle',
+    expect(mockSetTargetEnabled).toHaveBeenCalledWith(
+      targetRef('public', 'bicycle'),
       'cycling_speed',
       false
     );
   });
 
-  it('should route a profile value edit to that profile', async () => {
+  it('should route a value edit to the target that owns the control', async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SettingsPanel />);
 
     await user.click(screen.getByRole('checkbox', { name: 'Shortest' }));
 
-    expect(mockUpdateProfileSetting).toHaveBeenCalledWith(
-      'bicycle',
+    expect(mockUpdateTargetSetting).toHaveBeenCalledWith(
+      targetRef('public', 'bicycle'),
       'shortest',
       true
     );
     expect(mockRefetchDirections).toHaveBeenCalled();
   });
 
-  it('should keep each profile section independent when several are selected', () => {
-    mockUseSearch.mockReturnValue({ profile: 'car,truck' });
+  it('should keep each target section independent when several are selected', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,public:truck' });
     renderWithQueryClient(<SettingsPanel />);
 
     // Both expose Width, so the checkbox ids must not collide across sections.
-    expect(screen.getAllByTestId('include-width')).toHaveLength(2);
+    expect(screen.getByTestId('include-public__car-width')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('include-public__truck-width')
+    ).toBeInTheDocument();
   });
 
-  it('should reset every selected profile plus the shared scope', async () => {
+  it('should not let the same profile on two instances share a checkbox', () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    renderWithQueryClient(<SettingsPanel />);
+
+    expect(screen.getByTestId('include-public__car-width')).toBeInTheDocument();
+    expect(screen.getByTestId('include-local__car-width')).toBeInTheDocument();
+  });
+
+  it('should tick a target-scoped option without ticking its twin', async () => {
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    await enableFor('local__car', ['use_ferry']);
+    renderWithQueryClient(<SettingsPanel />);
+
+    expect(screen.getByTestId('include-local__car-use_ferry')).toBeChecked();
+    expect(
+      screen.getByTestId('include-public__car-use_ferry')
+    ).not.toBeChecked();
+  });
+
+  it('should address the right instance when the same profile is edited twice', async () => {
     const user = userEvent.setup();
-    mockUseSearch.mockReturnValue({ profile: 'car,emergency' });
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    renderWithQueryClient(<SettingsPanel />);
+
+    await user.click(screen.getByTestId('include-local__car-use_ferry'));
+
+    expect(mockSetTargetEnabled).toHaveBeenCalledWith(
+      targetRef('local', 'car'),
+      'use_ferry',
+      true
+    );
+    expect(mockSetTargetEnabled).not.toHaveBeenCalledWith(
+      targetRef('public', 'car'),
+      'use_ferry',
+      true
+    );
+  });
+
+  it('should reset every selected target', async () => {
+    const user = userEvent.setup();
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:emergency' });
     renderWithQueryClient(<SettingsPanel />);
 
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
 
-    expect(mockResetSettings).toHaveBeenCalledWith(['car', 'emergency']);
+    expect(mockResetSettings).toHaveBeenCalledWith([
+      targetRef('public', 'car'),
+      targetRef('local', 'emergency'),
+    ]);
   });
 
   it('should call refetchDirections after reset', async () => {
@@ -309,6 +465,17 @@ describe('SettingsPanel', () => {
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
 
     expect(mockRefetchDirections).toHaveBeenCalled();
+  });
+
+  it('should refetch isochrones instead when the isochrones tab is active', async () => {
+    const user = userEvent.setup();
+    mockUseParams.mockReturnValue({ activeTab: 'isochrones' });
+    renderWithQueryClient(<SettingsPanel />);
+
+    await user.click(screen.getByRole('button', { name: /^Reset$/i }));
+
+    expect(mockRefetchIsochrones).toHaveBeenCalled();
+    expect(mockRefetchDirections).not.toHaveBeenCalled();
   });
 
   it('should show Copied! feedback after clicking Copy to Clipboard', async () => {
@@ -324,264 +491,57 @@ describe('SettingsPanel', () => {
     });
   });
 
+  it('should copy one costing payload per target, keyed by target', async () => {
+    const user = userEvent.setup();
+    mockUseSearch.mockReturnValue({ profile: 'public:car,local:car' });
+    await enableFor('local__car', ['use_ferry']);
+    renderWithQueryClient(<SettingsPanel />);
+
+    await user.click(
+      screen.getByRole('button', { name: /Copy to Clipboard/i })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Copied!')).toBeInTheDocument();
+    });
+
+    const copied = JSON.parse(await navigator.clipboard.readText()) as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(Object.keys(copied)).toEqual(['public__car', 'local__car']);
+    expect(copied.local__car).toHaveProperty('use_ferry');
+    expect(copied.public__car).toEqual({});
+  });
+
+  it('should render the geocoding toggle', () => {
+    renderWithQueryClient(<SettingsPanel />);
+    expect(
+      screen.getByRole('checkbox', { name: 'Geocoding' })
+    ).toBeInTheDocument();
+  });
+
   describe('Server Settings', () => {
     it('should render Server Settings section', () => {
       renderWithQueryClient(<SettingsPanel />);
       expect(screen.getByText('Server Settings')).toBeInTheDocument();
     });
 
-    it('should render Base URL label when expanded', async () => {
-      const user = userEvent.setup();
+    it('should count the configured instances in the subtitle', () => {
       renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      expect(screen.getByText('Base URL')).toBeInTheDocument();
+      expect(screen.getByText('(2)')).toBeInTheDocument();
     });
 
-    it('should render base URL input when expanded', async () => {
+    it('should list every instance when expanded', async () => {
       const user = userEvent.setup();
       renderWithQueryClient(<SettingsPanel />);
 
       await user.click(screen.getByText('Server Settings'));
 
-      expect(
-        screen.getByRole('textbox', { name: /Base URL/i })
-      ).toBeInTheDocument();
-    });
-
-    it('should render Reset Base URL button when expanded', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      expect(
-        screen.getByRole('button', { name: /Reset Base URL/i })
-      ).toBeInTheDocument();
-    });
-
-    it('should display stored base URL from localStorage', async () => {
-      const user = userEvent.setup();
-      const customUrl = 'https://custom.valhalla.com';
-      localStorage.setItem(BASE_URL_STORAGE_KEY, customUrl);
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      expect(input).toHaveValue(customUrl);
-    });
-
-    it('should update input value when typing', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'https://new.valhalla.com');
-
-      expect(input).toHaveValue('https://new.valhalla.com');
-    });
-
-    it('should not save to localStorage while typing', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'https://test.com');
-
-      expect(localStorage.getItem(BASE_URL_STORAGE_KEY)).toBeNull();
-    });
-
-    it('should show error for invalid URL format on blur', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'not-a-valid-url');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-      });
-    });
-
-    it('should show error for non-http protocol on blur', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'ftp://example.com');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(
-          screen.getByText('URL must use HTTP or HTTPS protocol')
-        ).toBeInTheDocument();
-      });
-    });
-
-    it('should clear error when typing after error', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'invalid');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-      });
-
-      await user.type(input, 'https://valid.com');
-
-      await waitFor(() => {
-        expect(
-          screen.queryByText('Invalid URL format')
-        ).not.toBeInTheDocument();
-      });
-    });
-
-    it('should have aria-invalid attribute when there is an error', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'invalid');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(input).toHaveAttribute('aria-invalid', 'true');
-      });
-    });
-
-    it('should reset base URL to default when Reset Base URL is clicked', async () => {
-      const user = userEvent.setup();
-      const customUrl = 'https://custom.valhalla.com';
-      localStorage.setItem(BASE_URL_STORAGE_KEY, customUrl);
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const resetButton = screen.getByRole('button', {
-        name: /Reset Base URL/i,
-      });
-      await user.click(resetButton);
-
-      expect(localStorage.getItem(BASE_URL_STORAGE_KEY)).toBeNull();
-    });
-
-    it('should disable Reset Base URL button when URL equals default', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const resetButton = screen.getByRole('button', {
-        name: /Reset Base URL/i,
-      });
-      expect(resetButton).toBeDisabled();
-    });
-
-    it('should enable Reset Base URL button when URL differs from default', async () => {
-      const user = userEvent.setup();
-      const customUrl = 'https://custom.valhalla.com';
-      localStorage.setItem(BASE_URL_STORAGE_KEY, customUrl);
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const resetButton = screen.getByRole('button', {
-        name: /Reset Base URL/i,
-      });
-      expect(resetButton).toBeEnabled();
-    });
-
-    it('should not re-send request on blur when input is in error state and value unchanged', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'invalid-url');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-      });
-
-      await user.click(input);
-      await user.tab();
-
-      expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-    });
-
-    it('should re-send request on blur after user modifies the error input value', async () => {
-      const user = userEvent.setup();
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'invalid-url');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-      });
-
-      await user.type(input, '-modified');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-      });
-    });
-
-    it('should clear error state when reset button is clicked after error', async () => {
-      const user = userEvent.setup();
-      const customUrl = 'https://custom.valhalla.com';
-      localStorage.setItem(BASE_URL_STORAGE_KEY, customUrl);
-      renderWithQueryClient(<SettingsPanel />);
-
-      await user.click(screen.getByText('Server Settings'));
-
-      const input = screen.getByRole('textbox', { name: /Base URL/i });
-      await user.clear(input);
-      await user.type(input, 'invalid-url');
-      await user.tab();
-
-      await waitFor(() => {
-        expect(screen.getByText('Invalid URL format')).toBeInTheDocument();
-      });
-
-      const resetButton = screen.getByRole('button', {
-        name: /Reset Base URL/i,
-      });
-      await user.click(resetButton);
-
-      expect(screen.queryByText('Invalid URL format')).not.toBeInTheDocument();
+      expect(screen.getByTestId('instance-public')).toBeInTheDocument();
+      expect(screen.getByTestId('instance-local')).toBeInTheDocument();
+      expect(screen.getByTestId('add-instance-button')).toBeInTheDocument();
     });
   });
 
@@ -594,21 +554,21 @@ describe('SettingsPanel', () => {
 
     it('should display current bicycle_type value from settings', () => {
       renderWithQueryClient(<SettingsPanel />);
-      // The mock has bicycle_type: 'Hybrid'
+      // The seed has bicycle_type: 'Hybrid'
       expect(screen.getByText('Hybrid')).toBeInTheDocument();
     });
 
     it('should render Pedestrian Type select only once for pedestrian profile', () => {
-      mockUseSearch.mockReturnValue({ profile: 'pedestrian' });
+      mockUseSearch.mockReturnValue({ profile: 'public:pedestrian' });
       renderWithQueryClient(<SettingsPanel />);
       const pedestrianTypeLabels = screen.getAllByText('Pedestrian Type');
       expect(pedestrianTypeLabels).toHaveLength(1);
     });
 
     it('should display current pedestrian type value from settings', () => {
-      mockUseSearch.mockReturnValue({ profile: 'pedestrian' });
+      mockUseSearch.mockReturnValue({ profile: 'public:pedestrian' });
       renderWithQueryClient(<SettingsPanel />);
-      // The mock has type: 'Foot'
+      // The seed has type: 'Foot'
       expect(screen.getByText('Foot')).toBeInTheDocument();
     });
 
@@ -617,16 +577,22 @@ describe('SettingsPanel', () => {
       const bicycleTypeSelect = screen.getByRole('combobox', {
         name: /Bicycle Type/i,
       });
-      expect(bicycleTypeSelect).toBeInTheDocument();
+      expect(bicycleTypeSelect).toHaveAttribute(
+        'id',
+        'public__bicycle-bicycle_type'
+      );
     });
 
     it('should render pedestrian type combobox with correct id', () => {
-      mockUseSearch.mockReturnValue({ profile: 'pedestrian' });
+      mockUseSearch.mockReturnValue({ profile: 'public:pedestrian' });
       renderWithQueryClient(<SettingsPanel />);
       const pedestrianTypeSelect = screen.getByRole('combobox', {
         name: /Pedestrian Type/i,
       });
-      expect(pedestrianTypeSelect).toBeInTheDocument();
+      expect(pedestrianTypeSelect).toHaveAttribute(
+        'id',
+        'public__pedestrian-type'
+      );
     });
   });
 });

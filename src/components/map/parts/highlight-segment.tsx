@@ -12,11 +12,11 @@ export function HighlightSegment() {
   const data = useMemo(() => {
     if (!highlightSegment) return null;
 
-    const { startIndex, endIndex, profile, index } = highlightSegment;
-    const coords = getRouteAt(directionResults.byProfile, {
-      profile,
-      index,
-    })?.decodedGeometry;
+    const { startIndex, endIndex } = highlightSegment;
+    const coords = getRouteAt(
+      directionResults.byTarget,
+      highlightSegment
+    )?.decodedGeometry;
 
     if (startIndex > -1 && endIndex > -1 && coords) {
       return {

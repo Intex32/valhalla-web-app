@@ -3,8 +3,7 @@ import {
   getProfileSettingsGroup,
   groupParams,
 } from '@/components/settings-panel/settings-options';
-import type { Profile } from '@/stores/common-store';
-import { getProfileScope, type ScopedSettings } from '@/stores/common-store';
+import type { Profile, ScopedSettings } from '@/stores/common-store';
 import type { PossibleSettings } from '@/components/types';
 
 type CostingValue =
@@ -23,37 +22,31 @@ export interface RequestSettings {
   };
 }
 
-interface SettingsState {
-  shared: ScopedSettings;
-  perProfile: Partial<Record<Profile, ScopedSettings>>;
-}
+/** Every costing option a profile can be given, general and profile-owned alike. */
+export const targetParams = (profile: Profile): string[] => {
+  const general =
+    profile === 'auto' ? [] : groupParams(generalSettings[profile]);
+  return [
+    ...new Set([...general, ...groupParams(getProfileSettingsGroup(profile))]),
+  ];
+};
 
 /**
- * Turns the panel state into one profile's `costing_options` payload.
+ * Turns one target's scope into its `costing_options` payload.
  *
- * Only options the user has explicitly enabled are included — everything else
- * is left out so Valhalla applies its own default for that costing model. This
- * matters for models like `emergency`, whose whole point is defaults that
- * differ from `auto`; sending ours unconditionally would overwrite them.
+ * Only options the user explicitly enabled are included — everything else is
+ * left out so Valhalla applies its own default for that costing model on that
+ * server. Nothing is shared between targets: two instances running the same
+ * profile are configured, and sent, entirely independently.
  */
 export const buildCostingOptions = (
   profile: Profile,
-  { shared, perProfile }: SettingsState
+  scope: ScopedSettings,
+  excludePolygons: GeoJSON.GeoJSON[] = []
 ): RequestSettings => {
   const costing: Record<string, CostingValue> = {};
 
-  // Shared general options first, but only those this costing model understands.
-  if (profile !== 'auto') {
-    for (const param of groupParams(generalSettings[profile])) {
-      if (shared.enabled[param]) {
-        costing[param] = shared.values[param as keyof PossibleSettings];
-      }
-    }
-  }
-
-  // The profile's own section wins where the two overlap.
-  const scope = getProfileScope(perProfile, profile);
-  for (const param of groupParams(getProfileSettingsGroup(profile))) {
+  for (const param of targetParams(profile)) {
     if (scope.enabled[param]) {
       costing[param] = scope.values[param as keyof PossibleSettings];
     }
@@ -61,10 +54,11 @@ export const buildCostingOptions = (
 
   return {
     costing,
-    // Request-level params rather than costing options — always sent.
     directions: {
-      alternates: shared.values.alternates,
-      exclude_polygons: shared.values.exclude_polygons,
+      // Request-level rather than costing options. `alternates` is the target's
+      // own; the exclude polygons are one map drawing shared by every target.
+      alternates: scope.values.alternates,
+      exclude_polygons: excludePolygons,
     },
   };
 };

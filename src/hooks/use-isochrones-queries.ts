@@ -7,7 +7,7 @@ import type {
   ValhallaIsochroneResponse,
 } from '@/components/types';
 import {
-  getValhallaUrl,
+  getInstanceUrl,
   buildIsochronesRequest,
   showValhallaWarnings,
   VALHALLA_CLIENT_HEADERS,
@@ -18,26 +18,38 @@ import {
   parseGeocodeResponse,
 } from '@/utils/nominatim';
 import { buildCostingOptions } from '@/utils/build-costing-options';
+import {
+  classifyValhallaError,
+  toRequestError,
+  ValhallaError,
+} from '@/utils/valhalla-errors';
 import { calcArea } from '@/utils/geom';
-import { useCommonStore, type Profile } from '@/stores/common-store';
+import { useCommonStore, getTargetScope } from '@/stores/common-store';
 import {
   useIsochronesStore,
-  type ProfileIsochroneResult,
+  type TargetIsochroneFailure,
+  type TargetIsochroneResult,
 } from '@/stores/isochrones-store';
-import { getProfileLabel, parseProfilesWithFallback } from '@/utils/profiles';
+import { readSelectedTargets } from '@/hooks/use-selected-targets';
+import { describeTarget } from '@/hooks/use-directions-queries';
+import type { TargetRef } from '@/utils/targets';
 import { router } from '@/routes';
 
-async function fetchIsochronesForProfile(
-  profile: Profile,
+async function fetchIsochronesForTarget(
+  target: TargetRef,
   center: Center
 ): Promise<ValhallaIsochroneResponse> {
   const { maxRange, interval, denoise, generalize } =
     useIsochronesStore.getState();
-  const { shared, perProfile } = useCommonStore.getState();
-  const settings = buildCostingOptions(profile, { shared, perProfile });
+  const { perTarget, excludePolygons } = useCommonStore.getState();
+  const settings = buildCostingOptions(
+    target.profile,
+    getTargetScope(perTarget, target),
+    excludePolygons
+  );
 
   const valhallaRequest = buildIsochronesRequest({
-    profile,
+    profile: target.profile,
     center,
     // @ts-expect-error todo: initial settings and filtered settings types mismatch
     settings,
@@ -50,15 +62,24 @@ async function fetchIsochronesForProfile(
     json: JSON.stringify(valhallaRequest.json),
   });
 
-  const response = await fetch(`${getValhallaUrl()}/isochrone?${params}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...VALHALLA_CLIENT_HEADERS,
-    },
-  });
+  const response = await fetch(
+    `${getInstanceUrl(target.instanceId)}/isochrone?${params.toString()}`,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...VALHALLA_CLIENT_HEADERS,
+      },
+    }
+  );
 
   if (!response.ok) {
-    throw new Error('Could not fetch resource');
+    // The body has to be read here, not swallowed: error_code 125 is what
+    // distinguishes "this server has no such profile" from a real failure.
+    const errorData: { error_code?: number; error?: string } | null =
+      await response.json().catch(() => null);
+    throw new ValhallaError(
+      classifyValhallaError(errorData, 'Could not fetch resource')
+    );
   }
 
   const data: ValhallaIsochroneResponse = await response.json();
@@ -70,17 +91,18 @@ async function fetchIsochronesForProfile(
     }
   });
 
-  showValhallaWarnings(data.warnings);
+  showValhallaWarnings(data.warnings, describeTarget(target));
 
   return data;
 }
 
-/** Requests contours around the same centre for every selected profile. */
-async function fetchIsochrones(): Promise<ProfileIsochroneResult[] | null> {
+/** Requests contours around the same centre for every selected target. */
+async function fetchIsochrones(): Promise<{
+  results: TargetIsochroneResult[];
+  failures: TargetIsochroneFailure[];
+} | null> {
   const { geocodeResults } = useIsochronesStore.getState();
-  const profiles = parseProfilesWithFallback(
-    router.state.location.search.profile
-  );
+  const targets = readSelectedTargets(router.state.location.search.profile);
   const center = geocodeResults.find((result) => result.selected);
 
   if (!center) {
@@ -88,34 +110,37 @@ async function fetchIsochrones(): Promise<ProfileIsochroneResult[] | null> {
   }
 
   const settled = await Promise.allSettled(
-    profiles.map((profile) =>
-      fetchIsochronesForProfile(profile, center as Center)
-    )
+    targets.map((target) => fetchIsochronesForTarget(target, center as Center))
   );
 
-  const results: ProfileIsochroneResult[] = [];
-  const failures: string[] = [];
+  const results: TargetIsochroneResult[] = [];
+  const failures: TargetIsochroneFailure[] = [];
 
   settled.forEach((outcome, i) => {
-    const profile = profiles[i]!;
+    const target = targets[i]!;
     if (outcome.status === 'fulfilled') {
-      results.push({ profile, data: outcome.value });
+      results.push({ target, data: outcome.value });
     } else {
-      const reason =
-        outcome.reason instanceof Error
-          ? outcome.reason.message
-          : 'Failed to fetch isochrones';
-      failures.push(`${getProfileLabel(profile)}: ${reason}`);
+      const { kind, message } = toRequestError(
+        outcome.reason,
+        'Failed to fetch isochrones'
+      );
+      failures.push({ target, kind, message });
     }
   });
 
-  if (failures.length > 0) {
+  const errors = failures.filter((failure) => failure.kind === 'error');
+  if (errors.length > 0) {
     toast.warning(
-      failures.length === profiles.length
+      results.length === 0
         ? 'No isochrones could be calculated'
-        : 'Some profiles returned no isochrone',
+        : 'Some targets returned no isochrone',
       {
-        description: failures.join('\n'),
+        description: errors
+          .map(
+            (failure) => `${describeTarget(failure.target)}: ${failure.message}`
+          )
+          .join('\n'),
         position: 'bottom-center',
         duration: 5000,
         closeButton: true,
@@ -123,11 +148,7 @@ async function fetchIsochrones(): Promise<ProfileIsochroneResult[] | null> {
     );
   }
 
-  if (results.length === 0) {
-    throw new Error(failures[0] ?? 'Failed to fetch isochrones');
-  }
-
-  return results;
+  return { results, failures };
 }
 
 export function useIsochronesQuery() {
@@ -141,13 +162,13 @@ export function useIsochronesQuery() {
     queryFn: async () => {
       showLoading(true);
       try {
-        const results = await fetchIsochrones();
-        if (results) {
-          receiveIsochroneResults(results);
+        const outcome = await fetchIsochrones();
+        if (outcome) {
+          receiveIsochroneResults(outcome);
         }
-        return results;
+        return outcome;
       } catch (error) {
-        receiveIsochroneResults([]);
+        receiveIsochroneResults({ results: [], failures: [] });
         throw error;
       } finally {
         setTimeout(() => showLoading(false), 500);

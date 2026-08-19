@@ -20,10 +20,9 @@ const mockUseDirectionsStore = vi.fn();
 
 // The component resolves coordinates through `getRouteAt`, so the real module
 // exports have to survive the mock — only the hook is replaced.
-vi.mock('@/stores/directions-store', async () => {
-  const actual = await vi.importActual<
-    typeof import('@/stores/directions-store')
-  >('@/stores/directions-store');
+vi.mock('@/stores/directions-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/directions-store')>();
 
   return {
     ...actual,
@@ -31,6 +30,10 @@ vi.mock('@/stores/directions-store', async () => {
       mockUseDirectionsStore(selector),
   };
 });
+
+const publicCar = { instanceId: 'public', profile: 'car' as const };
+const publicEmergency = { instanceId: 'public', profile: 'emergency' as const };
+const localCar = { instanceId: 'local', profile: 'car' as const };
 
 const carRoute = {
   decodedGeometry: [
@@ -61,18 +64,30 @@ const emergencyRoute = {
   alternates: [],
 };
 
+/** The same profile, routed on the other server — a different target. */
+const localCarRoute = {
+  decodedGeometry: [
+    [80, 40],
+    [81, 41],
+    [82, 42],
+    [83, 43],
+  ],
+  alternates: [],
+};
+
 const createMockState = (overrides = {}) => ({
   results: {
-    byProfile: [
-      { profile: 'car', data: carRoute },
-      { profile: 'emergency', data: emergencyRoute },
+    byTarget: [
+      { target: publicCar, data: carRoute },
+      { target: publicEmergency, data: emergencyRoute },
     ],
+    failures: [],
     show: {},
   },
   highlightSegment: {
+    ...publicCar,
     startIndex: 1,
     endIndex: 2,
-    profile: 'car',
     index: 0,
   },
   ...overrides,
@@ -103,20 +118,44 @@ describe('HighlightSegment', () => {
 
   it('should render nothing when there are no route results', () => {
     const { container } = renderWithState(
-      createMockState({ results: { byProfile: [], show: {} } })
+      createMockState({ results: { byTarget: [], failures: [], show: {} } })
     );
 
     expect(container.firstChild).toBeNull();
   });
 
-  it('should render nothing when the referenced profile has no result', () => {
+  it('should render nothing when the referenced target has no result', () => {
     const { container } = renderWithState(
       createMockState({
-        results: { byProfile: [{ profile: 'car', data: carRoute }], show: {} },
+        results: {
+          byTarget: [{ target: publicCar, data: carRoute }],
+          failures: [],
+          show: {},
+        },
         highlightSegment: {
+          ...publicEmergency,
           startIndex: 1,
           endIndex: 2,
-          profile: 'emergency',
+          index: 0,
+        },
+      })
+    );
+
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('should render nothing when only another instance ran that profile', () => {
+    const { container } = renderWithState(
+      createMockState({
+        results: {
+          byTarget: [{ target: localCar, data: localCarRoute }],
+          failures: [],
+          show: {},
+        },
+        highlightSegment: {
+          ...publicCar,
+          startIndex: 1,
+          endIndex: 2,
           index: 0,
         },
       })
@@ -158,9 +197,9 @@ describe('HighlightSegment', () => {
     renderWithState(
       createMockState({
         highlightSegment: {
+          ...publicEmergency,
           startIndex: 1,
           endIndex: 2,
-          profile: 'emergency',
           index: 0,
         },
       })
@@ -171,13 +210,13 @@ describe('HighlightSegment', () => {
     expect(coords[1]).toEqual([32, 72]);
   });
 
-  it("should resolve the segment against that profile's alternate", () => {
+  it("should resolve the segment against that target's alternate", () => {
     renderWithState(
       createMockState({
         highlightSegment: {
+          ...publicCar,
           startIndex: 1,
           endIndex: 2,
-          profile: 'car',
           index: 1,
         },
       })
@@ -188,13 +227,37 @@ describe('HighlightSegment', () => {
     expect(coords[1]).toEqual([22, 62]);
   });
 
+  it('should tell the same profile on two instances apart', () => {
+    const byTarget = [
+      { target: publicCar, data: carRoute },
+      { target: localCar, data: localCarRoute },
+    ];
+
+    renderWithState(
+      createMockState({
+        results: { byTarget, failures: [], show: {} },
+        highlightSegment: {
+          ...localCar,
+          startIndex: 1,
+          endIndex: 2,
+          index: 0,
+        },
+      })
+    );
+
+    // Matching on profile alone would pick the public server's line first.
+    const coords = renderedCoordinates();
+    expect(coords[0]).toEqual([41, 81]);
+    expect(coords[1]).toEqual([42, 82]);
+  });
+
   it('should render nothing when startIndex is -1', () => {
     const { container } = renderWithState(
       createMockState({
         highlightSegment: {
+          ...publicCar,
           startIndex: -1,
           endIndex: 2,
-          profile: 'car',
           index: 0,
         },
       })
@@ -207,9 +270,9 @@ describe('HighlightSegment', () => {
     const { container } = renderWithState(
       createMockState({
         highlightSegment: {
+          ...publicCar,
           startIndex: 0,
           endIndex: -1,
-          profile: 'car',
           index: 0,
         },
       })

@@ -2,14 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Settings } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
-import { SliderSetting } from '@/components/ui/slider-setting';
 import { SelectSetting } from '@/components/ui/select-setting';
 import { DateTimeButton } from '@/components/ui/date-time-button';
 import { SettingsButton } from '@/components/settings-button';
 import { useCommonStore } from '@/stores/common-store';
 import {
   languageOptions,
-  settingsInit,
   DEFAULT_DIRECTIONS_LANGUAGE,
   type DirectionsLanguage,
 } from '@/components/settings-panel/settings-options';
@@ -19,24 +17,24 @@ import {
 } from '@/utils/directions-language';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
-import type { PossibleSettings } from '@/components/types';
 
 interface QuickSettingsProps {
   showTravelTime?: boolean;
-  showAlternates?: boolean;
   showLanguage?: boolean;
 }
 
+/**
+ * Left-sidebar panel for the settings that are not costing options: departure
+ * time and directions language. Everything a Valhalla request carries per
+ * target — including `alternates` — lives in the advanced panel, where each
+ * target has its own section.
+ */
 export const QuickSettings = ({
   showTravelTime = true,
-  showAlternates = true,
   showLanguage = true,
 }: QuickSettingsProps) => {
   const search = useSearch({ from: '/$activeTab' });
   const navigate = useNavigate({ from: '/$activeTab' });
-  const shared = useCommonStore((state) => state.shared);
-  const settings = shared.values;
-  const updateSettings = useCommonStore((state) => state.updateSharedSetting);
   const dateTime = useCommonStore((state) => state.dateTime);
   const updateDateTime = useCommonStore((state) => state.updateDateTime);
   const { refetch: refetchDirections } = useDirectionsQuery();
@@ -54,70 +52,33 @@ export const QuickSettings = ({
     return getDirectionsLanguage();
   });
 
-  // The willingness params are edited in the advanced panel now, but their URL
-  // round-trip stays here: QuickSettings is mounted on every routing tab, so
-  // it's the one component that can own hydration and permalinking for them.
-  // Hydrate store from URL on mount (URL wins when present).
+  // Hydrate from URL on mount (URL wins when present).
   const urlSettingsHydrated = useRef(false);
   useEffect(() => {
     if (urlSettingsHydrated.current) return;
     urlSettingsHydrated.current = true;
 
-    if (search.use_ferry !== undefined) {
-      updateSettings('use_ferry', search.use_ferry);
-    }
-    if (search.use_highways !== undefined) {
-      updateSettings('use_highways', search.use_highways);
-    }
-    if (search.use_tolls !== undefined) {
-      updateSettings('use_tolls', search.use_tolls);
-    }
-    if (search.alternates !== undefined) {
-      updateSettings('alternates', search.alternates);
-    }
     if (search.lang) {
       setDirectionsLanguage(search.lang as DirectionsLanguage);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Mirror store → URL. Willingness params only appear once the user has opted
-  // into sending them, so a permalink carries exactly what Valhalla receives.
+  // Mirror language → URL (omitted at the default to keep URLs clean).
   useEffect(() => {
-    const permalinked = (param: 'use_ferry' | 'use_highways' | 'use_tolls') =>
-      shared.enabled[param] ? (settings[param] as number) : undefined;
-
     navigate({
       search: (prev) => ({
         ...prev,
-        use_ferry: permalinked('use_ferry'),
-        use_highways: permalinked('use_highways'),
-        use_tolls: permalinked('use_tolls'),
-        alternates:
-          settings.alternates === settingsInit.alternates
-            ? undefined
-            : (settings.alternates as number),
         lang: language === DEFAULT_DIRECTIONS_LANGUAGE ? undefined : language,
       }),
       replace: true,
     });
-  }, [settings, shared.enabled, language, navigate]);
+  }, [language, navigate]);
 
   const refetchAll = useCallback(() => {
     refetchDirections();
     refetchIsochrones();
   }, [refetchDirections, refetchIsochrones]);
-
-  const handleSettingChange = useCallback(
-    (
-      name: keyof PossibleSettings,
-      value: PossibleSettings[keyof PossibleSettings]
-    ) => {
-      updateSettings(name, value);
-      refetchAll();
-    },
-    [updateSettings, refetchAll]
-  );
 
   const handleDateTimeChange = useCallback(
     (field: 'type' | 'value', value: string) => {
@@ -155,29 +116,6 @@ export const QuickSettings = ({
                 onChange={handleDateTimeChange}
               />
             </div>
-          )}
-
-          {showAlternates && (
-            <SliderSetting
-              id="alternates"
-              label="Alternative routes"
-              description="How many alternative routes to request alongside the main route."
-              min={0}
-              max={5}
-              step={1}
-              value={(settings.alternates as number) ?? 0}
-              unit="routes"
-              onValueChange={(values) => {
-                updateSettings('alternates', values[0] ?? 0);
-              }}
-              onValueCommit={() => refetchDirections()}
-              onInputChange={(values) => {
-                let parsed = values[0] ?? 0;
-                if (isNaN(parsed)) parsed = 0;
-                parsed = Math.max(0, Math.min(parsed, 5));
-                handleSettingChange('alternates', parsed);
-              }}
-            />
           )}
 
           {showLanguage && (

@@ -3,10 +3,33 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouteCard } from './route-card';
 import type { ParsedDirectionsGeometry } from '@/components/types';
-import { getRouteColor } from '@/utils/profile-colors';
+import { getTargetRouteColor } from '@/utils/profile-colors';
+import type { ValhallaInstance } from '@/stores/instances-store';
+import type { TargetRef } from '@/utils/targets';
 
 const mockExportDataAsJson = vi.fn();
 const mockDownloadFile = vi.fn();
+
+/** `public` is index 0, `local` index 1 — the shade comes from that position. */
+const mockInstances: ValhallaInstance[] = [
+  { id: 'public', label: 'Public', url: 'https://valhalla1.openstreetmap.de' },
+  { id: 'local', label: 'Local', url: 'http://localhost:8002' },
+];
+
+const publicCar: TargetRef = { instanceId: 'public', profile: 'car' };
+const localCar: TargetRef = { instanceId: 'local', profile: 'car' };
+const localTruck: TargetRef = { instanceId: 'local', profile: 'truck' };
+
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+  return {
+    ...actual,
+    useInstancesStore: vi.fn((selector) =>
+      selector({ instances: mockInstances })
+    ),
+  };
+});
 
 vi.mock('@/utils/export', () => ({
   exportDataAsJson: (...args: unknown[]) => mockExportDataAsJson(...args),
@@ -24,16 +47,20 @@ vi.mock('@/utils/date-time', () => ({
 vi.mock('./summary', () => ({
   Summary: ({
     title,
-    profile,
+    target,
     index,
   }: {
     summary: unknown;
     title: string;
-    profile: string;
+    target: TargetRef;
     index: number;
     routeCoordinates: number[][];
   }) => (
-    <div data-testid={`mock-summary-${index}`} data-profile={profile}>
+    <div
+      data-testid={`mock-summary-${index}`}
+      data-instance={target.instanceId}
+      data-profile={target.profile}
+    >
       Summary: {title}
     </div>
   ),
@@ -41,14 +68,18 @@ vi.mock('./summary', () => ({
 
 vi.mock('./maneuvers', () => ({
   Maneuvers: ({
-    profile,
+    target,
     index,
   }: {
     legs: unknown[];
-    profile: string;
+    target: TargetRef;
     index: number;
   }) => (
-    <div data-testid={`mock-maneuvers-${index}`} data-profile={profile}>
+    <div
+      data-testid={`mock-maneuvers-${index}`}
+      data-instance={target.instanceId}
+      data-profile={target.profile}
+    >
       Maneuvers
     </div>
   ),
@@ -116,7 +147,7 @@ describe('RouteCard', () => {
       render(
         <RouteCard
           data={data}
-          profile="car"
+          target={localCar}
           index={0}
           isActive={true}
           onSelect={vi.fn()}
@@ -133,7 +164,7 @@ describe('RouteCard', () => {
     const { container } = render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={false}
         onSelect={vi.fn()}
@@ -148,7 +179,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -164,7 +195,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={1}
         isActive={false}
         onSelect={vi.fn()}
@@ -179,7 +210,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -197,7 +228,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -218,7 +249,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -239,7 +270,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -255,7 +286,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -270,13 +301,13 @@ describe('RouteCard', () => {
     ).toBeInTheDocument();
   });
 
-  it('should call exportDataAsJson when JSON is clicked', async () => {
+  it('should call exportDataAsJson with an instance-qualified prefix', async () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -288,7 +319,31 @@ describe('RouteCard', () => {
 
     expect(mockExportDataAsJson).toHaveBeenCalledWith(
       data,
-      'valhalla-directions'
+      'valhalla-directions-local-car'
+    );
+  });
+
+  it('should name JSON exports after the instance that produced them', async () => {
+    const user = userEvent.setup();
+    const data = createMockData();
+    render(
+      <RouteCard
+        data={data}
+        target={publicCar}
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /export/i }));
+    await user.click(screen.getByRole('menuitem', { name: 'JSON' }));
+
+    // Same profile as the `local` card above — without the instance in the
+    // name the two downloads would be indistinguishable.
+    expect(mockExportDataAsJson).toHaveBeenCalledWith(
+      data,
+      'valhalla-directions-public-car'
     );
   });
 
@@ -298,7 +353,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -310,9 +365,32 @@ describe('RouteCard', () => {
 
     expect(mockDownloadFile).toHaveBeenCalledWith({
       data: expect.stringContaining('"type": "Feature"'),
-      fileName: 'valhalla-directions_2024-01-01_12-00-00.geojson',
+      fileName: 'valhalla-directions-local-car_2024-01-01_12-00-00.geojson',
       fileType: 'text/json',
     });
+  });
+
+  it('should name GeoJSON exports after the instance that produced them', async () => {
+    const user = userEvent.setup();
+    const data = createMockData();
+    render(
+      <RouteCard
+        data={data}
+        target={publicCar}
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /export/i }));
+    await user.click(screen.getByRole('menuitem', { name: 'GeoJSON' }));
+
+    expect(mockDownloadFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileName: 'valhalla-directions-public-car_2024-01-01_12-00-00.geojson',
+      })
+    );
   });
 
   it('should convert coordinates to GeoJSON format (lng, lat)', async () => {
@@ -323,7 +401,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -347,7 +425,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={false}
         onSelect={vi.fn()}
@@ -364,7 +442,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={false}
         onSelect={vi.fn()}
@@ -384,7 +462,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={publicCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
@@ -393,7 +471,9 @@ describe('RouteCard', () => {
 
     const card = screen.getByTestId('mock-summary-0').parentElement;
     expect(card).toHaveClass('border-l-4');
-    expect(card).toHaveStyle({ borderLeftColor: getRouteColor('car', 0) });
+    expect(card).toHaveStyle({
+      borderLeftColor: getTargetRouteColor(0, 'car', 0),
+    });
   });
 
   it('should tint the active border with the profile colour', () => {
@@ -401,38 +481,92 @@ describe('RouteCard', () => {
     const { unmount } = render(
       <RouteCard
         data={data}
-        profile="car"
+        target={publicCar}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
       />
     );
     expect(screen.getByTestId('mock-summary-0').parentElement).toHaveStyle({
-      borderLeftColor: getRouteColor('car', 0),
+      borderLeftColor: getTargetRouteColor(0, 'car', 0),
     });
     unmount();
 
     render(
       <RouteCard
         data={data}
-        profile="emergency"
+        target={{ instanceId: 'public', profile: 'emergency' }}
         index={0}
         isActive={true}
         onSelect={vi.fn()}
       />
     );
     expect(screen.getByTestId('mock-summary-0').parentElement).toHaveStyle({
-      borderLeftColor: getRouteColor('emergency', 0),
+      borderLeftColor: getTargetRouteColor(0, 'emergency', 0),
     });
-    expect(getRouteColor('emergency', 0)).not.toBe(getRouteColor('car', 0));
+    expect(getTargetRouteColor(0, 'emergency', 0)).not.toBe(
+      getTargetRouteColor(0, 'car', 0)
+    );
   });
 
-  it('should fade the active border for alternates of the same profile', () => {
+  it('should shade the active border by instance for the same profile', () => {
+    const data = createMockData();
+
+    const { unmount } = render(
+      <RouteCard
+        data={data}
+        target={publicCar}
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+    const publicColor =
+      screen.getByTestId('mock-summary-0').parentElement?.style.borderLeftColor;
+    unmount();
+
+    render(
+      <RouteCard
+        data={data}
+        target={localCar}
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+    const localColor =
+      screen.getByTestId('mock-summary-0').parentElement?.style.borderLeftColor;
+
+    // `public` is instance 0 and `local` instance 1: same hue, different shade,
+    // which is what keeps two servers running `car` apart on the map.
+    expect(publicColor).toBeTruthy();
+    expect(localColor).toBeTruthy();
+    expect(localColor).not.toBe(publicColor);
+  });
+
+  it('should fall back to the first instance shade for an unknown instance', () => {
     const data = createMockData();
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={{ instanceId: 'deleted-server', profile: 'car' }}
+        index={0}
+        isActive={true}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('mock-summary-0').parentElement).toHaveStyle({
+      borderLeftColor: getTargetRouteColor(0, 'car', 0),
+    });
+  });
+
+  it('should fade the active border for alternates of the same target', () => {
+    const data = createMockData();
+    render(
+      <RouteCard
+        data={data}
+        target={localCar}
         index={1}
         isActive={true}
         onSelect={vi.fn()}
@@ -440,9 +574,11 @@ describe('RouteCard', () => {
     );
 
     expect(screen.getByTestId('mock-summary-1').parentElement).toHaveStyle({
-      borderLeftColor: getRouteColor('car', 1),
+      borderLeftColor: getTargetRouteColor(1, 'car', 1),
     });
-    expect(getRouteColor('car', 1)).not.toBe(getRouteColor('car', 0));
+    expect(getTargetRouteColor(1, 'car', 1)).not.toBe(
+      getTargetRouteColor(1, 'car', 0)
+    );
   });
 
   it('should not apply active styling when isActive is false', () => {
@@ -450,7 +586,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={false}
         onSelect={vi.fn()}
@@ -462,30 +598,28 @@ describe('RouteCard', () => {
     expect(card?.style.borderLeftColor).toBe('');
   });
 
-  it('should forward the profile to Summary and Maneuvers', async () => {
+  it('should forward the target to Summary and Maneuvers', async () => {
     const user = userEvent.setup();
     const data = createMockData();
     render(
       <RouteCard
         data={data}
-        profile="truck"
+        target={localTruck}
         index={0}
         isActive={false}
         onSelect={vi.fn()}
       />
     );
 
-    expect(screen.getByTestId('mock-summary-0')).toHaveAttribute(
-      'data-profile',
-      'truck'
-    );
+    const summary = screen.getByTestId('mock-summary-0');
+    expect(summary).toHaveAttribute('data-profile', 'truck');
+    expect(summary).toHaveAttribute('data-instance', 'local');
 
     await user.click(screen.getByRole('button', { name: /show maneuvers/i }));
 
-    expect(screen.getByTestId('mock-maneuvers-0')).toHaveAttribute(
-      'data-profile',
-      'truck'
-    );
+    const maneuvers = screen.getByTestId('mock-maneuvers-0');
+    expect(maneuvers).toHaveAttribute('data-profile', 'truck');
+    expect(maneuvers).toHaveAttribute('data-instance', 'local');
   });
 
   it('should call onSelect when card is clicked', async () => {
@@ -495,7 +629,7 @@ describe('RouteCard', () => {
     render(
       <RouteCard
         data={data}
-        profile="car"
+        target={localCar}
         index={0}
         isActive={false}
         onSelect={onSelect}

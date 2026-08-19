@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { IsochroneLocations } from './isochrone-locations';
+import { targetKey, type TargetRef } from '@/utils/targets';
 
 const mockSource = vi.fn();
 const mockLayer = vi.fn();
@@ -18,10 +19,23 @@ vi.mock('react-map-gl/maplibre', () => ({
 
 const mockUseIsochronesStore = vi.fn();
 
-vi.mock('@/stores/isochrones-store', () => ({
-  useIsochronesStore: (selector: (state: unknown) => unknown) =>
-    mockUseIsochronesStore(selector),
-}));
+vi.mock('@/stores/isochrones-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/isochrones-store')>();
+
+  return {
+    ...actual,
+    useIsochronesStore: (selector: (state: unknown) => unknown) =>
+      mockUseIsochronesStore(selector),
+  };
+});
+
+const publicCar: TargetRef = { instanceId: 'public', profile: 'car' };
+const publicEmergency: TargetRef = {
+  instanceId: 'public',
+  profile: 'emergency',
+};
+const localCar: TargetRef = { instanceId: 'local', profile: 'car' };
 
 const snappedPoint = (coordinates: number[]) => ({
   type: 'Feature',
@@ -34,10 +48,14 @@ const isochroneResponse = (coordinates: number[]) => ({
   features: [snappedPoint(coordinates)],
 });
 
+const showAll = (targets: TargetRef[]) =>
+  Object.fromEntries(targets.map((target) => [targetKey(target), true]));
+
 const createMockState = (overrides = {}) => ({
   results: {
-    byProfile: [{ profile: 'car', data: isochroneResponse([10, 50]) }],
-    show: { car: true },
+    byTarget: [{ target: publicCar, data: isochroneResponse([10, 50]) }],
+    failures: [],
+    show: showAll([publicCar]),
   },
   successful: true,
   ...overrides,
@@ -61,9 +79,9 @@ describe('IsochroneLocations', () => {
     mockUseIsochronesStore.mockClear();
   });
 
-  it('should render nothing when no profile returned isochrones', () => {
+  it('should render nothing when no target returned isochrones', () => {
     const { container } = renderWithState(
-      createMockState({ results: { byProfile: [], show: {} } })
+      createMockState({ results: { byTarget: [], failures: [], show: {} } })
     );
 
     expect(container.firstChild).toBeNull();
@@ -77,12 +95,13 @@ describe('IsochroneLocations', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('should render nothing when every profile is hidden', () => {
+  it('should render nothing when every target is hidden', () => {
     const { container } = renderWithState(
       createMockState({
         results: {
-          byProfile: [{ profile: 'car', data: isochroneResponse([10, 50]) }],
-          show: { car: false },
+          byTarget: [{ target: publicCar, data: isochroneResponse([10, 50]) }],
+          failures: [],
+          show: { [targetKey(publicCar)]: false },
         },
       })
     );
@@ -128,9 +147,9 @@ describe('IsochroneLocations', () => {
     renderWithState(
       createMockState({
         results: {
-          byProfile: [
+          byTarget: [
             {
-              profile: 'car',
+              target: publicCar,
               data: {
                 type: 'FeatureCollection',
                 features: [
@@ -144,7 +163,8 @@ describe('IsochroneLocations', () => {
               },
             },
           ],
-          show: { car: true },
+          failures: [],
+          show: showAll([publicCar]),
         },
       })
     );
@@ -158,9 +178,9 @@ describe('IsochroneLocations', () => {
     renderWithState(
       createMockState({
         results: {
-          byProfile: [
+          byTarget: [
             {
-              profile: 'car',
+              target: publicCar,
               data: {
                 type: 'FeatureCollection',
                 features: [
@@ -174,7 +194,8 @@ describe('IsochroneLocations', () => {
               },
             },
           ],
-          show: { car: true },
+          failures: [],
+          show: showAll([publicCar]),
         },
       })
     );
@@ -184,33 +205,84 @@ describe('IsochroneLocations', () => {
     expect(features?.[0]?.properties.type).toBe('snapped');
   });
 
-  it('should draw locations from the first visible profile only', () => {
+  it('should draw locations from the first visible target of an instance only', () => {
     renderWithState(
       createMockState({
         results: {
-          byProfile: [
-            { profile: 'car', data: isochroneResponse([10, 50]) },
-            { profile: 'emergency', data: isochroneResponse([20, 60]) },
+          byTarget: [
+            { target: publicCar, data: isochroneResponse([10, 50]) },
+            { target: publicEmergency, data: isochroneResponse([20, 60]) },
           ],
-          show: { car: true, emergency: true },
+          failures: [],
+          show: showAll([publicCar, publicEmergency]),
+        },
+      })
+    );
+
+    // Every profile on one server snaps to the same centre, so one marker.
+    const features = renderedFeatures();
+    expect(features).toHaveLength(1);
+    expect(features?.[0]?.geometry.coordinates).toEqual([10, 50]);
+  });
+
+  it('should fall back to the next target of the instance when the first is hidden', () => {
+    renderWithState(
+      createMockState({
+        results: {
+          byTarget: [
+            { target: publicCar, data: isochroneResponse([10, 50]) },
+            { target: publicEmergency, data: isochroneResponse([20, 60]) },
+          ],
+          failures: [],
+          show: {
+            [targetKey(publicCar)]: false,
+            [targetKey(publicEmergency)]: true,
+          },
         },
       })
     );
 
     const features = renderedFeatures();
     expect(features).toHaveLength(1);
-    expect(features?.[0]?.geometry.coordinates).toEqual([10, 50]);
+    expect(features?.[0]?.geometry.coordinates).toEqual([20, 60]);
   });
 
-  it('should fall back to the next profile when the first one is hidden', () => {
+  it('should draw one marker per instance because tilesets snap differently', () => {
     renderWithState(
       createMockState({
         results: {
-          byProfile: [
-            { profile: 'car', data: isochroneResponse([10, 50]) },
-            { profile: 'emergency', data: isochroneResponse([20, 60]) },
+          byTarget: [
+            { target: publicCar, data: isochroneResponse([10, 50]) },
+            { target: publicEmergency, data: isochroneResponse([11, 51]) },
+            { target: localCar, data: isochroneResponse([20, 60]) },
           ],
-          show: { car: false, emergency: true },
+          failures: [],
+          show: showAll([publicCar, publicEmergency, localCar]),
+        },
+      })
+    );
+
+    const features = renderedFeatures();
+    expect(features).toHaveLength(2);
+    expect(features?.map((f) => f.geometry.coordinates)).toEqual([
+      [10, 50],
+      [20, 60],
+    ]);
+  });
+
+  it('should keep the other instance marker when one instance is hidden', () => {
+    renderWithState(
+      createMockState({
+        results: {
+          byTarget: [
+            { target: publicCar, data: isochroneResponse([10, 50]) },
+            { target: localCar, data: isochroneResponse([20, 60]) },
+          ],
+          failures: [],
+          show: {
+            [targetKey(publicCar)]: false,
+            [targetKey(localCar)]: true,
+          },
         },
       })
     );

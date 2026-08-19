@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { RouteLines } from './route-lines';
-import { PROFILE_COLORS } from '@/utils/profile-colors';
+import { routeKey } from '@/stores/directions-store';
+import { PROFILE_COLORS, getTargetColor } from '@/utils/profile-colors';
+import type { TargetRef } from '@/utils/targets';
 
 const mockSource = vi.fn();
 const mockLayer = vi.fn();
@@ -19,12 +21,11 @@ vi.mock('react-map-gl/maplibre', () => ({
 
 const mockUseDirectionsStore = vi.fn();
 
-// `routeKey` is imported by the component itself, so the factory has to keep
-// the real module's exports around and only swap out the hook.
-vi.mock('@/stores/directions-store', async () => {
-  const actual = await vi.importActual<
-    typeof import('@/stores/directions-store')
-  >('@/stores/directions-store');
+// `routeKey` and `sameTarget` are imported by the component itself, so the
+// factory has to keep the real module's exports around and only swap the hook.
+vi.mock('@/stores/directions-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/directions-store')>();
 
   return {
     ...actual,
@@ -32,6 +33,35 @@ vi.mock('@/stores/directions-store', async () => {
       mockUseDirectionsStore(selector),
   };
 });
+
+// Two instances, in a fixed order: `instanceIndex` (kept real) turns that
+// order into the colour shade, so 'public' is 0 and 'local' is 1.
+const { mockInstances } = vi.hoisted(() => ({
+  mockInstances: [
+    {
+      id: 'public',
+      label: 'Public',
+      url: 'https://valhalla1.openstreetmap.de',
+    },
+    { id: 'local', label: 'Local', url: 'http://localhost:8002' },
+  ],
+}));
+
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+
+  return {
+    ...actual,
+    useInstancesStore: (selector: (state: unknown) => unknown) =>
+      selector({ instances: mockInstances }),
+  };
+});
+
+const publicCar = { instanceId: 'public', profile: 'car' as const };
+const publicEmergency = { instanceId: 'public', profile: 'emergency' as const };
+const localCar = { instanceId: 'local', profile: 'car' as const };
+const ghostCar = { instanceId: 'ghost', profile: 'car' as const };
 
 const carRoute = {
   decodedGeometry: [
@@ -59,28 +89,67 @@ const emergencyRoute = {
   alternates: [],
 };
 
-const createMockState = (overrides = {}) => ({
-  results: {
-    byProfile: [{ profile: 'car', data: { ...carRoute, alternates: [] } }],
-    show: { 'car:0': true },
-  },
-  successful: true,
-  activeRoute: { profile: 'car', index: 0 },
-  ...overrides,
-});
+const localCarRoute = {
+  decodedGeometry: [
+    [30, 6],
+    [31, 7],
+  ],
+  trip: { summary: { length: 90, time: 3000 } },
+  alternates: [],
+};
 
-/** Two profiles, the first of which also has an alternate. */
-const createMultiProfileState = (overrides = {}) =>
-  createMockState({
-    results: {
-      byProfile: [
-        { profile: 'car', data: carRoute },
-        { profile: 'emergency', data: emergencyRoute },
-      ],
-      show: { 'car:0': true, 'car:1': true, 'emergency:0': true },
-    },
+/** Every route of every target visible. */
+const showAll = (
+  entries: { target: TargetRef; data: { alternates?: unknown[] } }[]
+) => {
+  const show: Record<string, boolean> = {};
+  for (const { target, data } of entries) {
+    show[routeKey(target, 0)] = true;
+    data.alternates?.forEach((_, i) => {
+      show[routeKey(target, i + 1)] = true;
+    });
+  }
+  return show;
+};
+
+const createMockState = (overrides = {}) => {
+  const byTarget = [
+    { target: publicCar, data: { ...carRoute, alternates: [] } },
+  ];
+
+  return {
+    results: { byTarget, failures: [], show: showAll(byTarget) },
+    successful: true,
+    activeRoute: { ...publicCar, index: 0 },
+    ...overrides,
+  };
+};
+
+/** Two profiles on one instance, the first of which also has an alternate. */
+const createMultiProfileState = (overrides = {}) => {
+  const byTarget = [
+    { target: publicCar, data: carRoute },
+    { target: publicEmergency, data: emergencyRoute },
+  ];
+
+  return createMockState({
+    results: { byTarget, failures: [], show: showAll(byTarget) },
     ...overrides,
   });
+};
+
+/** The same profile on two servers — two independent targets. */
+const createMultiInstanceState = (overrides = {}) => {
+  const byTarget = [
+    { target: publicCar, data: { ...carRoute, alternates: [] } },
+    { target: localCar, data: localCarRoute },
+  ];
+
+  return createMockState({
+    results: { byTarget, failures: [], show: showAll(byTarget) },
+    ...overrides,
+  });
+};
 
 const renderWithState = (state: unknown) => {
   mockUseDirectionsStore.mockImplementation((selector) => selector(state));
@@ -100,9 +169,9 @@ describe('RouteLines', () => {
     mockUseDirectionsStore.mockClear();
   });
 
-  it('should render nothing when no profile returned a route', () => {
+  it('should render nothing when no target returned a route', () => {
     const { container } = renderWithState(
-      createMockState({ results: { byProfile: [], show: {} } })
+      createMockState({ results: { byTarget: [], failures: [], show: {} } })
     );
 
     expect(container.firstChild).toBeNull();
@@ -169,23 +238,27 @@ describe('RouteLines', () => {
     expect(coords?.[1]).toEqual([11, 51]);
   });
 
-  it('should emit one feature per profile/route pair', () => {
+  it('should emit one feature per target/route pair', () => {
     renderWithState(createMultiProfileState());
 
     const features = renderedFeatures();
     expect(features).toHaveLength(3);
     expect(
-      features?.map((f) => [f.properties.profile, f.properties.routeIndex])
+      features?.map((f) => [
+        f.properties.instanceId,
+        f.properties.profile,
+        f.properties.routeIndex,
+      ])
     ).toEqual(
       expect.arrayContaining([
-        ['car', 0],
-        ['car', 1],
-        ['emergency', 0],
+        ['public', 'car', 0],
+        ['public', 'car', 1],
+        ['public', 'emergency', 0],
       ])
     );
   });
 
-  it('should tag each feature with profile, route index, type and summary', () => {
+  it('should tag each feature with target, route index, type and summary', () => {
     renderWithState(createMultiProfileState());
 
     const features = renderedFeatures() ?? [];
@@ -196,6 +269,7 @@ describe('RouteLines', () => {
       (f) => f.properties.profile === 'car' && f.properties.routeIndex === 1
     );
 
+    expect(main?.properties.instanceId).toBe('public');
     expect(main?.properties.type).toBe('main');
     expect(main?.properties.summary).toEqual({ length: 100, time: 3600 });
     expect(alternate?.properties.type).toBe('alternate');
@@ -217,7 +291,7 @@ describe('RouteLines', () => {
     expect(emergency?.properties.color).toBe(PROFILE_COLORS.emergency);
   });
 
-  it('should fade alternates away from their profile colour', () => {
+  it('should fade alternates away from their target colour', () => {
     renderWithState(createMultiProfileState());
 
     const alternate = renderedFeatures()?.find(
@@ -225,6 +299,68 @@ describe('RouteLines', () => {
     );
 
     expect(alternate?.properties.color).not.toBe(PROFILE_COLORS.car);
+  });
+
+  it('should draw the same profile from two instances as two features in different shades', () => {
+    renderWithState(createMultiInstanceState());
+
+    const features = renderedFeatures() ?? [];
+    expect(features).toHaveLength(2);
+
+    const fromPublic = features.find(
+      (f) => f.properties.instanceId === 'public'
+    );
+    const fromLocal = features.find((f) => f.properties.instanceId === 'local');
+
+    expect(fromPublic?.properties.profile).toBe('car');
+    expect(fromLocal?.properties.profile).toBe('car');
+    // Instance 0 keeps the untouched profile hue; instance 1 is shifted.
+    expect(fromPublic?.properties.color).toBe(getTargetColor(0, 'car'));
+    expect(fromLocal?.properties.color).toBe(getTargetColor(1, 'car'));
+    expect(fromPublic?.properties.color).not.toBe(fromLocal?.properties.color);
+  });
+
+  it('should keep the geometries of the two instances apart', () => {
+    renderWithState(createMultiInstanceState());
+
+    const features = renderedFeatures() ?? [];
+    const fromPublic = features.find(
+      (f) => f.properties.instanceId === 'public'
+    );
+    const fromLocal = features.find((f) => f.properties.instanceId === 'local');
+
+    expect(fromPublic?.geometry.coordinates[0]).toEqual([10, 50]);
+    expect(fromLocal?.geometry.coordinates[0]).toEqual([6, 30]);
+  });
+
+  it('should skip targets whose instance is no longer in the list', () => {
+    const byTarget = [
+      { target: publicCar, data: { ...carRoute, alternates: [] } },
+      { target: ghostCar, data: localCarRoute },
+    ];
+
+    renderWithState(
+      createMockState({
+        results: { byTarget, failures: [], show: showAll(byTarget) },
+      })
+    );
+
+    const features = renderedFeatures() ?? [];
+    expect(features).toHaveLength(1);
+    expect(features[0]?.properties.instanceId).toBe('public');
+  });
+
+  it('should emit no features when every result belongs to an unknown instance', () => {
+    const byTarget = [{ target: ghostCar, data: localCarRoute }];
+
+    renderWithState(
+      createMockState({
+        results: { byTarget, failures: [], show: showAll(byTarget) },
+        activeRoute: { ...ghostCar, index: 0 },
+      })
+    );
+
+    expect(renderedFeatures()).toHaveLength(0);
   });
 
   it('should mark only the active route as active and draw it last', () => {
@@ -242,7 +378,7 @@ describe('RouteLines', () => {
   it('should follow the active route across profiles', () => {
     renderWithState(
       createMultiProfileState({
-        activeRoute: { profile: 'emergency', index: 0 },
+        activeRoute: { ...publicEmergency, index: 0 },
       })
     );
 
@@ -251,15 +387,32 @@ describe('RouteLines', () => {
     expect(features[features.length - 1]?.properties.isActive).toBe(true);
   });
 
+  it('should not treat the same profile on another instance as active', () => {
+    renderWithState(
+      createMultiInstanceState({ activeRoute: { ...localCar, index: 0 } })
+    );
+
+    const features = renderedFeatures() ?? [];
+    const active = features.filter((f) => f.properties.isActive);
+
+    expect(active).toHaveLength(1);
+    expect(active[0]?.properties.instanceId).toBe('local');
+  });
+
   it('should skip routes hidden via show', () => {
     renderWithState(
       createMultiProfileState({
         results: {
-          byProfile: [
-            { profile: 'car', data: carRoute },
-            { profile: 'emergency', data: emergencyRoute },
+          byTarget: [
+            { target: publicCar, data: carRoute },
+            { target: publicEmergency, data: emergencyRoute },
           ],
-          show: { 'car:0': true, 'car:1': false, 'emergency:0': false },
+          failures: [],
+          show: {
+            [routeKey(publicCar, 0)]: true,
+            [routeKey(publicCar, 1)]: false,
+            [routeKey(publicEmergency, 0)]: false,
+          },
         },
       })
     );
@@ -268,5 +421,27 @@ describe('RouteLines', () => {
     expect(features).toHaveLength(1);
     expect(features[0]?.properties.profile).toBe('car');
     expect(features[0]?.properties.routeIndex).toBe(0);
+  });
+
+  it('should hide one instance without hiding the same profile on the other', () => {
+    renderWithState(
+      createMultiInstanceState({
+        results: {
+          byTarget: [
+            { target: publicCar, data: { ...carRoute, alternates: [] } },
+            { target: localCar, data: localCarRoute },
+          ],
+          failures: [],
+          show: {
+            [routeKey(publicCar, 0)]: false,
+            [routeKey(localCar, 0)]: true,
+          },
+        },
+      })
+    );
+
+    const features = renderedFeatures() ?? [];
+    expect(features).toHaveLength(1);
+    expect(features[0]?.properties.instanceId).toBe('local');
   });
 });

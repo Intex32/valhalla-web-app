@@ -2,16 +2,17 @@ import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useDirectionsStore } from '@/stores/directions-store';
 import {
-  getValhallaUrl,
+  getInstanceUrl,
   buildOptimizedRouteRequest,
   parseDirectionsGeometry,
   showValhallaWarnings,
   VALHALLA_CLIENT_HEADERS,
 } from '@/utils/valhalla';
 import { buildCostingOptions } from '@/utils/build-costing-options';
-import { getPrimaryProfile, parseProfilesWithFallback } from '@/utils/profiles';
+import { getPrimaryTarget } from '@/utils/targets';
+import { readSelectedTargets } from '@/hooks/use-selected-targets';
 import { useDirectionsQuery } from '@/hooks/use-directions-queries';
-import { useCommonStore } from '@/stores/common-store';
+import { useCommonStore, getTargetScope } from '@/stores/common-store';
 import { router } from '@/routes';
 import type { ValhallaOptimizedRouteResponse } from '@/components/types';
 import type { Waypoint } from '@/stores/directions-store';
@@ -44,13 +45,16 @@ export function useOptimizedRouteQuery() {
       }
 
       // Waypoint ordering is a single-route operation — it runs against the
-      // primary profile even when several are selected for comparison.
-      const profiles = parseProfilesWithFallback(
-        router.state.location.search.profile
+      // primary target even when several are selected for comparison.
+      const targets = readSelectedTargets(router.state.location.search.profile);
+      const target = getPrimaryTarget(targets)!;
+      const profile = target.profile;
+      const { perTarget, excludePolygons } = useCommonStore.getState();
+      const settings = buildCostingOptions(
+        profile,
+        getTargetScope(perTarget, target),
+        excludePolygons
       );
-      const profile = getPrimaryProfile(profiles);
-      const { shared, perProfile } = useCommonStore.getState();
-      const settings = buildCostingOptions(profile, { shared, perProfile });
       const language = getDirectionsLanguage();
       const request = buildOptimizedRouteRequest({
         profile,
@@ -64,7 +68,7 @@ export function useOptimizedRouteQuery() {
       });
 
       const response = await fetch(
-        `${getValhallaUrl()}/optimized_route?${params}`,
+        `${getInstanceUrl(target.instanceId)}/optimized_route?${params.toString()}`,
         {
           headers: VALHALLA_CLIENT_HEADERS,
         }
@@ -87,11 +91,11 @@ export function useOptimizedRouteQuery() {
       return {
         data: processedData,
         relevantWaypoints,
-        profile,
-        profileCount: profiles.length,
+        target,
+        targetCount: targets.length,
       };
     },
-    onSuccess: ({ data, relevantWaypoints, profile, profileCount }) => {
+    onSuccess: ({ data, relevantWaypoints, target, targetCount }) => {
       const newWaypoints: Waypoint[] = [];
       const locations = data.trip.locations;
       locations.forEach((loc) => {
@@ -104,14 +108,14 @@ export function useOptimizedRouteQuery() {
       });
       setWaypoint(newWaypoints);
       setIsOptimized(true);
-      receiveRouteResults({ results: [{ profile, data }] });
+      receiveRouteResults({ results: [{ target, data }] });
       zoomTo(data.decodedGeometry);
       toast.success('Route optimized successfully');
 
-      // /optimized_route only answers for the primary profile. The others are
+      // /optimized_route only answers for the primary target. The others are
       // now stale against the reordered waypoints, so re-route them rather
-      // than leaving the comparison silently reduced to one profile.
-      if (profileCount > 1) {
+      // than leaving the comparison silently reduced to one target.
+      if (targetCount > 1) {
         refetchDirections();
       }
     },

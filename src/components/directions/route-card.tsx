@@ -5,8 +5,9 @@ import { Summary } from './summary';
 import { Maneuvers } from './maneuvers';
 import { Button } from '@/components/ui/button';
 import type { ParsedDirectionsGeometry } from '@/components/types';
-import type { Profile } from '@/stores/common-store';
-import { getRouteColor } from '@/utils/profile-colors';
+import type { TargetRef } from '@/utils/targets';
+import { getTargetRouteColor } from '@/utils/profile-colors';
+import { useInstancesStore, instanceIndex } from '@/stores/instances-store';
 import {
   Collapsible,
   CollapsibleContent,
@@ -26,7 +27,7 @@ import { getDateTimeString } from '@/utils/date-time';
 
 interface RouteCardProps {
   data: ParsedDirectionsGeometry;
-  profile: Profile;
+  target: TargetRef;
   index: number;
   isActive: boolean;
   onSelect: () => void;
@@ -34,12 +35,18 @@ interface RouteCardProps {
 
 export const RouteCard = ({
   data,
-  profile,
+  target,
   index,
   isActive,
   onSelect,
 }: RouteCardProps) => {
   const [showManeuvers, setShowManeuvers] = useState(false);
+  const instances = useInstancesStore((state) => state.instances);
+  const color = getTargetRouteColor(
+    instanceIndex(instances, target.instanceId),
+    target.profile,
+    index
+  );
 
   const exportToGeoJson = useCallback(() => {
     const coordinates = data?.decodedGeometry;
@@ -59,10 +66,13 @@ export const RouteCard = ({
     const formattedData = JSON.stringify(geoJson, null, 2);
     downloadFile({
       data: formattedData,
-      fileName: 'valhalla-directions_' + getDateTimeString() + '.geojson',
+      fileName:
+        `valhalla-directions-${target.instanceId}-${target.profile}_` +
+        getDateTimeString() +
+        '.geojson',
       fileType: 'text/json',
     });
-  }, [data]);
+  }, [data, target]);
 
   if (!data.trip) {
     return null;
@@ -78,11 +88,7 @@ export const RouteCard = ({
           isActive && 'border-l-4'
         )}
         // The left edge carries the same colour the route has on the map.
-        style={
-          isActive
-            ? { borderLeftColor: getRouteColor(profile, index) }
-            : undefined
-        }
+        style={isActive ? { borderLeftColor: color } : undefined}
         onClick={onSelect}
         tabIndex={0}
         onKeyDown={(e) => {
@@ -95,7 +101,7 @@ export const RouteCard = ({
         <Summary
           title={`${index === 0 ? 'Main Route' : 'Alternate Route #' + index}`}
           summary={data.trip.summary}
-          profile={profile}
+          target={target}
           index={index}
           routeCoordinates={data.decodedGeometry ?? []}
         />
@@ -115,7 +121,12 @@ export const RouteCard = ({
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem
-                  onClick={() => exportDataAsJson(data, 'valhalla-directions')}
+                  onClick={() =>
+                    exportDataAsJson(
+                      data,
+                      `valhalla-directions-${target.instanceId}-${target.profile}`
+                    )
+                  }
                 >
                   JSON
                 </DropdownMenuItem>
@@ -127,7 +138,7 @@ export const RouteCard = ({
           </div>
           <CollapsibleContent>
             <Separator className="my-2" />
-            <Maneuvers legs={data.trip.legs} profile={profile} index={index} />
+            <Maneuvers legs={data.trip.legs} target={target} index={index} />
           </CollapsibleContent>
         </Collapsible>
       </div>

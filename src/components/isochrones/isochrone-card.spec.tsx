@@ -3,9 +3,16 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { IsochroneCard } from './isochrone-card';
 import type { ValhallaIsochroneResponse } from '@/components/types';
+import { getTargetColor } from '@/utils/profile-colors';
+import type { TargetRef } from '@/utils/targets';
 
 const mockToggleShowOnMap = vi.fn();
 const mockExportDataAsJson = vi.fn();
+
+const instances = [
+  { id: 'public', label: 'Public', url: 'https://valhalla1.openstreetmap.de' },
+  { id: 'local', label: 'Local', url: 'http://localhost:8002' },
+];
 
 vi.mock('@/stores/isochrones-store', () => ({
   useIsochronesStore: vi.fn((selector) =>
@@ -15,9 +22,23 @@ vi.mock('@/stores/isochrones-store', () => ({
   ),
 }));
 
+vi.mock('@/stores/instances-store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/stores/instances-store')>();
+  return {
+    ...actual,
+    useInstancesStore: vi.fn((selector: (state: unknown) => unknown) =>
+      selector({ instances })
+    ),
+  };
+});
+
 vi.mock('@/utils/export', () => ({
   exportDataAsJson: (...args: unknown[]) => mockExportDataAsJson(...args),
 }));
+
+const target = (instanceId: string, profile: string): TargetRef =>
+  ({ instanceId, profile }) as TargetRef;
 
 const createMockData = (
   features: {
@@ -44,7 +65,7 @@ describe('IsochroneCard', () => {
       render(
         <IsochroneCard
           data={data}
-          profile="car"
+          target={target('public', 'car')}
           showProfileLabel={false}
           showOnMap={true}
         />
@@ -57,7 +78,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -71,7 +92,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -85,7 +106,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="emergency"
+        target={target('public', 'emergency')}
         showProfileLabel={true}
         showOnMap={true}
       />
@@ -95,12 +116,12 @@ describe('IsochroneCard', () => {
     expect(screen.queryByText('Main Isochrone')).not.toBeInTheDocument();
   });
 
-  it('should render a colour dot in the profile colour when showProfileLabel is true', () => {
+  it('should render a colour dot in the target colour when showProfileLabel is true', () => {
     const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
     const { container } = render(
       <IsochroneCard
         data={data}
-        profile="emergency"
+        target={target('public', 'emergency')}
         showProfileLabel={true}
         showOnMap={true}
       />
@@ -108,7 +129,26 @@ describe('IsochroneCard', () => {
 
     const colorDot = container.querySelector('span[aria-hidden]');
     expect(colorDot).toBeInTheDocument();
+    // First instance keeps the untouched profile colour.
     expect(colorDot).toHaveStyle({ backgroundColor: '#dc2626' });
+  });
+
+  it('should shade the colour dot per instance so the same profile stays distinguishable', () => {
+    const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
+    const { container } = render(
+      <IsochroneCard
+        data={data}
+        target={target('local', 'emergency')}
+        showProfileLabel={true}
+        showOnMap={true}
+      />
+    );
+
+    const shaded = getTargetColor(1, 'emergency');
+    expect(shaded).not.toBe('#dc2626');
+    expect(container.querySelector('span[aria-hidden]')).toHaveStyle({
+      backgroundColor: shaded,
+    });
   });
 
   it('should not render a colour dot when showProfileLabel is false', () => {
@@ -116,7 +156,7 @@ describe('IsochroneCard', () => {
     const { container } = render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -127,18 +167,45 @@ describe('IsochroneCard', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('should tag the card with a profile-scoped test id', () => {
+  it('should tag the card with a target-scoped test id', () => {
     const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
     render(
       <IsochroneCard
         data={data}
-        profile="bicycle"
+        target={target('local', 'bicycle')}
         showProfileLabel={true}
         showOnMap={true}
       />
     );
 
-    expect(screen.getByTestId('isochrone-card-bicycle')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('isochrone-card-local__bicycle')
+    ).toBeInTheDocument();
+  });
+
+  it('should give the same profile on two instances different test ids', () => {
+    const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
+    render(
+      <>
+        <IsochroneCard
+          data={data}
+          target={target('public', 'car')}
+          showProfileLabel={true}
+          showOnMap={true}
+        />
+        <IsochroneCard
+          data={data}
+          target={target('local', 'car')}
+          showProfileLabel={true}
+          showOnMap={true}
+        />
+      </>
+    );
+
+    expect(
+      screen.getByTestId('isochrone-card-public__car')
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('isochrone-card-local__car')).toBeInTheDocument();
   });
 
   it('should render show on map switch', () => {
@@ -146,7 +213,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -156,12 +223,12 @@ describe('IsochroneCard', () => {
     expect(screen.getByLabelText('Show on map')).toBeInTheDocument();
   });
 
-  it('should scope the switch id to the profile', () => {
+  it('should scope the switch id to the target', () => {
     const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
     render(
       <IsochroneCard
         data={data}
-        profile="truck"
+        target={target('local', 'truck')}
         showProfileLabel={true}
         showOnMap={true}
       />
@@ -169,7 +236,7 @@ describe('IsochroneCard', () => {
 
     expect(screen.getByRole('switch')).toHaveAttribute(
       'id',
-      'show-on-map-truck'
+      'show-on-map-local__truck'
     );
   });
 
@@ -178,7 +245,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -192,7 +259,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={false}
       />
@@ -201,13 +268,13 @@ describe('IsochroneCard', () => {
     expect(screen.getByRole('switch')).not.toBeChecked();
   });
 
-  it('should call toggleShowOnMap with the profile when switch is toggled', async () => {
+  it('should call toggleShowOnMap with the target when switch is toggled', async () => {
     const user = userEvent.setup();
     const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('local', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -216,7 +283,7 @@ describe('IsochroneCard', () => {
     await user.click(screen.getByRole('switch'));
 
     expect(mockToggleShowOnMap).toHaveBeenCalledWith({
-      profile: 'car',
+      target: { instanceId: 'local', profile: 'car' },
       show: false,
     });
   });
@@ -226,7 +293,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -241,7 +308,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -256,7 +323,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -274,7 +341,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -293,7 +360,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -308,7 +375,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -323,7 +390,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -334,13 +401,13 @@ describe('IsochroneCard', () => {
     expect(screen.getByRole('menuitem', { name: 'JSON' })).toBeInTheDocument();
   });
 
-  it('should call exportDataAsJson with a profile-scoped file name', async () => {
+  it('should call exportDataAsJson with a target-scoped file name', async () => {
     const user = userEvent.setup();
     const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -351,17 +418,17 @@ describe('IsochroneCard', () => {
 
     expect(mockExportDataAsJson).toHaveBeenCalledWith(
       data,
-      'valhalla-isochrones-car'
+      'valhalla-isochrones-public__car'
     );
   });
 
-  it('should name the export after the card profile', async () => {
+  it('should name the export after the instance as well as the profile', async () => {
     const user = userEvent.setup();
     const data = createMockData([{ properties: { contour: 10, area: 5 } }]);
     render(
       <IsochroneCard
         data={data}
-        profile="emergency"
+        target={target('local', 'emergency')}
         showProfileLabel={true}
         showOnMap={true}
       />
@@ -372,7 +439,7 @@ describe('IsochroneCard', () => {
 
     expect(mockExportDataAsJson).toHaveBeenCalledWith(
       data,
-      'valhalla-isochrones-emergency'
+      'valhalla-isochrones-local__emergency'
     );
   });
 
@@ -382,7 +449,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={false}
       />
@@ -391,7 +458,7 @@ describe('IsochroneCard', () => {
     await user.click(screen.getByRole('switch'));
 
     expect(mockToggleShowOnMap).toHaveBeenCalledWith({
-      profile: 'car',
+      target: { instanceId: 'public', profile: 'car' },
       show: true,
     });
   });
@@ -401,7 +468,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />
@@ -415,7 +482,7 @@ describe('IsochroneCard', () => {
     render(
       <IsochroneCard
         data={data}
-        profile="car"
+        target={target('public', 'car')}
         showProfileLabel={false}
         showOnMap={true}
       />

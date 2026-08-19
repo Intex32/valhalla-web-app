@@ -8,9 +8,18 @@ import type {
   Settings,
   ValhallaWarning,
 } from '@/components/types';
-import { getBaseUrl } from './base-url';
+import { useInstancesStore } from '@/stores/instances-store';
+import { normalizeBaseUrl } from './base-url';
 
-export const getValhallaUrl = () => getBaseUrl();
+/**
+ * Base URL of one Valhalla instance. Read through the store rather than a
+ * module constant so an edited instance takes effect on the next request.
+ */
+export const getInstanceUrl = (instanceId: string): string => {
+  const { instances } = useInstancesStore.getState();
+  const instance = instances.find((candidate) => candidate.id === instanceId);
+  return normalizeBaseUrl(instance?.url ?? instances[0]?.url ?? '');
+};
 
 export const VALHALLA_CLIENT_HEADERS = {
   'X-Client-Id': import.meta.env.VITE_CLIENT_ID ?? 'unknown-web-app',
@@ -188,14 +197,24 @@ export const makeLocations = (waypoints: ActiveWaypoint[]) => {
   return locations;
 };
 
-export function showValhallaWarnings(warnings?: ValhallaWarning[]) {
+export function showValhallaWarnings(
+  warnings?: ValhallaWarning[],
+  source?: string
+) {
   if (!warnings?.length) return;
   for (const warning of warnings) {
-    toast.warning(`Warning (code ${warning.code})`, {
-      description: warning.text,
-      position: 'bottom-center',
-      duration: 5000,
-      closeButton: true,
-    });
+    // With several instances and profiles in flight the same warning arrives
+    // many times over, so it has to say which target it came from.
+    toast.warning(
+      source
+        ? `${source} — warning (code ${warning.code.toString()})`
+        : `Warning (code ${warning.code.toString()})`,
+      {
+        description: warning.text,
+        position: 'bottom-center',
+        duration: 5000,
+        closeButton: true,
+      }
+    );
   }
 }
