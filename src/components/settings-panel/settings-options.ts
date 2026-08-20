@@ -506,6 +506,40 @@ const shortest = {
   param: 'shortest',
 };
 
+const useDistance = {
+  name: 'Use Distance',
+  param: 'use_distance',
+  description:
+    'A factor that allows controlling the contribution of distance and time to the route costs. The value is in range between 0 and 1, where 0 only takes time into account (default) and 1 only distance. A factor of 0.5 will weight them roughly equally.',
+  unit: 'factor',
+  settings: {
+    min: 0,
+    max: 1,
+    step: 0.1,
+  },
+};
+
+const ignoreOneways = {
+  name: 'Ignore Oneways',
+  description:
+    'If set to true, ignores one-way restrictions. Especially useful for matching GPS traces to the road network ignoring uni-directional traffic rules. Not included in the Ignore Restrictions option.',
+  param: 'ignore_oneways',
+};
+
+const ignoreNonVehicularRestrictions = {
+  name: 'Ignore Non-Vehicular Restrictions',
+  description:
+    'Similar to Ignore Restrictions, but will respect restrictions that impact vehicle safety, such as weight and size restrictions.',
+  param: 'ignore_non_vehicular_restrictions',
+};
+
+const ignoreConstruction = {
+  name: 'Ignore Construction',
+  description:
+    'Will ignore construction tags. Only works when the server built its graph with construction included. Useful for planning future routes.',
+  param: 'ignore_construction',
+};
+
 const excludeCashOnlyTolls = {
   name: 'Exclude Cash Only Tolls',
   description:
@@ -920,6 +954,10 @@ export const settingsInit = {
   transit_start_end_max_distance: 2145,
   transit_transfer_max_distance: 800,
   disable_hierarchy_pruning: false,
+  use_distance: 0,
+  ignore_oneways: false,
+  ignore_non_vehicular_restrictions: false,
+  ignore_construction: false,
   use_trails: 0,
   denoise: 0.1,
   generalize: 0,
@@ -940,6 +978,16 @@ const tollSettings = [useTollways, tollBoothCost, tollBoothPenalty] as const;
 const ferrySettings = [useFerry, ferryCost] as const;
 const hovFlags = [includeHOV2, includeHOV3, includeHot] as const;
 const ignoreFlags = [ignoreClosures, ignoreRestrictions, ignoreAccess] as const;
+
+// Options Valhalla only accepts on the `auto` costing model (and our
+// `auto`-derived `emergency` fork) — deliberately not part of the
+// commonVehicleProfile* tuples that bus/truck/motorcycle also draw from.
+const autoOnlyNumeric = [useDistance] as const;
+const autoOnlyBoolean = [
+  ignoreOneways,
+  ignoreNonVehicularRestrictions,
+  ignoreConstruction,
+] as const;
 
 const commonVehicleProfileNumeric = [
   width,
@@ -999,8 +1047,8 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
   ),
 
   car: createSettings(
-    [...commonVehicleProfileNumeric],
-    [...commonVehicleProfileBoolean],
+    [...commonVehicleProfileNumeric, ...autoOnlyNumeric],
+    [...commonVehicleProfileBoolean, ...autoOnlyBoolean],
     [],
     [speedTypes]
   ),
@@ -1061,8 +1109,8 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
   // Custom, `auto`-derived costing model served by our Valhalla backend. It
   // accepts the same costing options as `auto`, so it mirrors the car profile.
   emergency: createSettings(
-    [...commonVehicleProfileNumeric],
-    [...commonVehicleProfileBoolean],
+    [...commonVehicleProfileNumeric, ...autoOnlyNumeric],
+    [...commonVehicleProfileBoolean, ...autoOnlyBoolean],
     [],
     [speedTypes]
   ),

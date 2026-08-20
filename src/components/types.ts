@@ -79,6 +79,10 @@ export interface PossibleSettings {
   transit_start_end_max_distance: number;
   transit_transfer_max_distance: number;
   disable_hierarchy_pruning: boolean;
+  use_distance: number;
+  ignore_oneways: boolean;
+  ignore_non_vehicular_restrictions: boolean;
+  ignore_construction: boolean;
   use_trails: number;
   denoise: number;
   generalize: number;
