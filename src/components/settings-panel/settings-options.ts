@@ -506,6 +506,21 @@ const shortest = {
   param: 'shortest',
 };
 
+// Fork-specific: only our own Valhalla deployment's `emergency` costing model
+// knows this option, so it lives outside every shared tuple.
+const krawanaSpeedFactor = {
+  name: 'Krawana Speed Factor',
+  param: 'krawana_speed_factor',
+  description:
+    'Multiplies the speed an emergency vehicle is assumed to travel at, e.g. to account for it being allowed to exceed the speed limit. 1 keeps the road’s regular speed, 2 doubles it. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 1,
+    max: 2,
+    step: 0.05,
+  },
+};
+
 const useDistance = {
   name: 'Use Distance',
   param: 'use_distance',
@@ -958,6 +973,7 @@ export const settingsInit = {
   ignore_oneways: false,
   ignore_non_vehicular_restrictions: false,
   ignore_construction: false,
+  krawana_speed_factor: 1,
   use_trails: 0,
   denoise: 0.1,
   generalize: 0,
@@ -1109,7 +1125,7 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
   // Custom, `auto`-derived costing model served by our Valhalla backend. It
   // accepts the same costing options as `auto`, so it mirrors the car profile.
   emergency: createSettings(
-    [...commonVehicleProfileNumeric, ...autoOnlyNumeric],
+    [...commonVehicleProfileNumeric, ...autoOnlyNumeric, krawanaSpeedFactor],
     [...commonVehicleProfileBoolean, ...autoOnlyBoolean],
     [],
     [speedTypes]

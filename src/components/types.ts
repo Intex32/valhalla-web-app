@@ -83,6 +83,7 @@ export interface PossibleSettings {
   ignore_oneways: boolean;
   ignore_non_vehicular_restrictions: boolean;
   ignore_construction: boolean;
+  krawana_speed_factor: number;
   use_trails: number;
   denoise: number;
   generalize: number;
