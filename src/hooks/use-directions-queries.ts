@@ -181,7 +181,6 @@ async function fetchDirections(): Promise<{
 
 export function useDirectionsQuery() {
   const showLoading = useCommonStore((state) => state.showLoading);
-  const zoomTo = useCommonStore((state) => state.zoomTo);
   const receiveRouteResults = useDirectionsStore(
     (state) => state.receiveRouteResults
   );
@@ -194,11 +193,10 @@ export function useDirectionsQuery() {
       try {
         const outcome = await fetchDirections();
         if (outcome) {
+          // Deliberately no camera move: recomputing a route (a setting
+          // change, a re-fetch) must not yank the map away from wherever the
+          // user has panned or zoomed to.
           receiveRouteResults(outcome);
-          // Fit every target's route, not just the first one.
-          zoomTo(
-            outcome.results.flatMap((result) => result.data.decodedGeometry)
-          );
         }
         return outcome;
       } catch (error) {

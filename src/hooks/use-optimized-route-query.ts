@@ -25,7 +25,6 @@ export function useOptimizedRouteQuery() {
     (state) => state.receiveRouteResults
   );
   const setIsOptimized = useDirectionsStore((state) => state.setIsOptimized);
-  const zoomTo = useCommonStore((state) => state.zoomTo);
   const { refetch: refetchDirections } = useDirectionsQuery();
 
   const mutation = useMutation({
@@ -109,7 +108,6 @@ export function useOptimizedRouteQuery() {
       setWaypoint(newWaypoints);
       setIsOptimized(true);
       receiveRouteResults({ results: [{ target, data }] });
-      zoomTo(data.decodedGeometry);
       toast.success('Route optimized successfully');
 
       // /optimized_route only answers for the primary target. The others are
