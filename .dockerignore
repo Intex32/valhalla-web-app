@@ -1,4 +1,3 @@
-package-lock.json
 yarn.lock
 
 # IDEs
@@ -35,3 +34,5 @@ Dockerfile
 .git
 .gitignore
 
+# unrelated local deployment experiments
+valhalla pr stuff/
