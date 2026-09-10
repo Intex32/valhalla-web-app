@@ -6,7 +6,7 @@ on:
       ref:
         description: Git ref or full commit SHA to build
         required: true
-        default: krawana
+        default: stage1-staging-image
 
 permissions:
   contents: read
@@ -91,12 +91,14 @@ jobs:
 
           docker run --detach --rm --name valhalla-ui-smoke \
             --publish 127.0.0.1:18080:80 "$IMAGE"
-          trap 'docker stop valhalla-ui-smoke' EXIT
+          trap 'docker rm -f valhalla-ui-smoke >/dev/null 2>&1 || true' EXIT
           for attempt in {1..30}; do
             if curl -fsS http://127.0.0.1:18080/ >/dev/null; then
               break
             fi
             if [[ "$attempt" == 30 ]]; then
+              echo "Smoke container failed to respond within 30 seconds. Logs:" >&2
+              docker logs valhalla-ui-smoke >&2 || true
               exit 1
             fi
             sleep 1
