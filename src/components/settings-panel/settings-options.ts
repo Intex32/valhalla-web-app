@@ -521,6 +521,58 @@ const krawanaSpeedFactor = {
   },
 };
 
+const krawanaMaxWrongWayLength = {
+  name: 'Krawana Max Wrong-Way Length',
+  param: 'krawana_max_wrong_way_length',
+  description:
+    'Maximum length of a single stretch an emergency vehicle may drive against the direction of travel. Stretches longer than this are not used at all. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'meters',
+  settings: {
+    min: 0,
+    max: 2000,
+    step: 50,
+  },
+};
+
+const krawanaWrongWayFactor = {
+  name: 'Krawana Wrong-Way Factor',
+  param: 'krawana_wrong_way_factor',
+  description:
+    'Multiplies the cost of driving against the direction of travel. Higher values make the emergency vehicle avoid wrong-way stretches more strongly. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 1,
+    max: 20,
+    step: 0.5,
+  },
+};
+
+const krawanaWrongWayRisk = {
+  name: 'Krawana Wrong-Way Risk',
+  param: 'krawana_wrong_way_risk',
+  description:
+    'Scales how much risk an emergency vehicle is willing to accept when driving against the direction of travel. 1 accepts the full risk the costing model assigns, lower values make wrong-way stretches less acceptable. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 0,
+    max: 1,
+    step: 0.05,
+  },
+};
+
+const krawanaWrongWaySpeed = {
+  name: 'Krawana Wrong-Way Speed',
+  param: 'krawana_wrong_way_speed',
+  description:
+    'Speed an emergency vehicle is assumed to travel at while driving against the direction of travel. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'kmh',
+  settings: {
+    min: 1,
+    max: 200,
+    step: 1,
+  },
+};
+
 const useDistance = {
   name: 'Use Distance',
   param: 'use_distance',
@@ -974,6 +1026,10 @@ export const settingsInit = {
   ignore_non_vehicular_restrictions: false,
   ignore_construction: false,
   krawana_speed_factor: 1,
+  krawana_max_wrong_way_length: 500,
+  krawana_wrong_way_factor: 5,
+  krawana_wrong_way_risk: 1,
+  krawana_wrong_way_speed: 30,
   use_trails: 0,
   denoise: 0.1,
   generalize: 0,
@@ -1125,7 +1181,15 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
   // Custom, `auto`-derived costing model served by our Valhalla backend. It
   // accepts the same costing options as `auto`, so it mirrors the car profile.
   emergency: createSettings(
-    [...commonVehicleProfileNumeric, ...autoOnlyNumeric, krawanaSpeedFactor],
+    [
+      ...commonVehicleProfileNumeric,
+      ...autoOnlyNumeric,
+      krawanaSpeedFactor,
+      krawanaMaxWrongWayLength,
+      krawanaWrongWayFactor,
+      krawanaWrongWayRisk,
+      krawanaWrongWaySpeed,
+    ],
     [...commonVehicleProfileBoolean, ...autoOnlyBoolean],
     [],
     [speedTypes]

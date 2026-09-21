@@ -84,6 +84,10 @@ export interface PossibleSettings {
   ignore_non_vehicular_restrictions: boolean;
   ignore_construction: boolean;
   krawana_speed_factor: number;
+  krawana_max_wrong_way_length: number;
+  krawana_wrong_way_factor: number;
+  krawana_wrong_way_risk: number;
+  krawana_wrong_way_speed: number;
   use_trails: number;
   denoise: number;
   generalize: number;
