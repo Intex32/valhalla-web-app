@@ -68,6 +68,44 @@ const targetGroup = (target: TargetRef): SettingsGroup => {
   };
 };
 
+/**
+ * The fork-specific knobs are the whole point of the `emergency` profile, so
+ * they stay in view while the inherited `auto` options fold away. `top_speed`
+ * rides along: an emergency vehicle's top speed is tuned together with them.
+ */
+const isKrawanaParam = (param: string) =>
+  param.startsWith('krawana_') || param === 'top_speed';
+
+/** Splits a group into the options matching `predicate` and everything else. */
+const partitionGroup = (
+  group: SettingsGroup,
+  predicate: (param: string) => boolean
+): [SettingsGroup, SettingsGroup] => {
+  const split = <T extends { param: string }>(options: T[]) => ({
+    matching: options.filter((option) => predicate(option.param)),
+    rest: options.filter((option) => !predicate(option.param)),
+  });
+  const numeric = split(group.numeric);
+  const boolean = split(group.boolean);
+  const enums = split(group.enum);
+  const list = split(group.list);
+
+  return [
+    {
+      numeric: numeric.matching,
+      boolean: boolean.matching,
+      enum: enums.matching,
+      list: list.matching,
+    },
+    {
+      numeric: numeric.rest,
+      boolean: boolean.rest,
+      enum: enums.rest,
+      list: list.rest,
+    },
+  ];
+};
+
 export const SettingsPanel = () => {
   const selectedTargets = useSelectedTargets();
   const { activeTab } = useParams({ from: '/$activeTab' });
@@ -241,15 +279,30 @@ const TargetSection = ({
 }: TargetSectionProps) => {
   const group = targetGroup(target);
   const key = targetKey(target);
-  const params = [
-    ...group.numeric,
-    ...group.boolean,
-    ...group.enum,
-    ...group.list,
-  ]
-    .map((option) => option.param)
-    .filter((param) => !OMITTED_PARAMS.has(param));
+  const [standardOpen, setStandardOpen] = useState(false);
+
+  // Only `emergency` splits; every other profile renders as one flat list.
+  const [pinnedGroup, foldedGroup] =
+    target.profile === 'emergency'
+      ? partitionGroup(group, isKrawanaParam)
+      : [group, null];
+
+  const paramsOf = (settingsGroup: SettingsGroup) =>
+    [
+      ...settingsGroup.numeric,
+      ...settingsGroup.boolean,
+      ...settingsGroup.enum,
+      ...settingsGroup.list,
+    ]
+      .map((option) => option.param)
+      .filter((param) => !OMITTED_PARAMS.has(param));
+
+  const params = paramsOf(group);
   const enabled = params.filter((param) => scope.enabled[param]).length;
+  const foldedParams = foldedGroup ? paramsOf(foldedGroup) : [];
+  const foldedEnabled = foldedParams.filter(
+    (param) => scope.enabled[param]
+  ).length;
 
   return (
     // The left edge carries the target's map colour, tying the section to the
@@ -291,7 +344,7 @@ const TargetSection = ({
         />
 
         <SettingsGroupFields
-          group={group}
+          group={pinnedGroup}
           values={scope.values}
           enabled={scope.enabled}
           omitParams={OMITTED_PARAMS}
@@ -300,6 +353,29 @@ const TargetSection = ({
           onCommit={onCommit}
           onIncludedChange={onIncludedChange}
         />
+
+        {/* `emergency` only: its inherited `auto` options are the long tail, so
+            they fold away behind the fork-specific ones. */}
+        {foldedGroup ? (
+          <CollapsibleSection
+            title="Standard options"
+            subtitle={`(${foldedEnabled.toString()}/${foldedParams.length.toString()})`}
+            open={standardOpen}
+            onOpenChange={setStandardOpen}
+            className="mt-2 border-t pt-1"
+          >
+            <SettingsGroupFields
+              group={foldedGroup}
+              values={scope.values}
+              enabled={scope.enabled}
+              omitParams={OMITTED_PARAMS}
+              idPrefix={key}
+              onValueChange={onValueChange}
+              onCommit={onCommit}
+              onIncludedChange={onIncludedChange}
+            />
+          </CollapsibleSection>
+        ) : null}
       </CollapsibleSection>
     </div>
   );
