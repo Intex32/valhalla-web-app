@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Source, Layer } from 'react-map-gl/maplibre';
 import { useDirectionsStore, routeKey } from '@/stores/directions-store';
 import { useInstancesStore, instanceIndex } from '@/stores/instances-store';
-import { getTargetRouteColor } from '@/utils/profile-colors';
+import { getTargetColor, getTargetRouteColor } from '@/utils/profile-colors';
 import { sameTarget, type TargetRef } from '@/utils/targets';
 import type { Feature, FeatureCollection, LineString } from 'geojson';
 import type { ParsedDirectionsGeometry } from '@/components/types';
@@ -43,6 +43,13 @@ export function RouteLines() {
             instanceIndex(instances, target.instanceId),
             target.profile,
             index
+          ),
+          // The active route drops the per-alternate fade and draws in the
+          // target's full colour, so alternate #5 selected is as loud as the
+          // main route selected.
+          activeColor: getTargetColor(
+            instanceIndex(instances, target.instanceId),
+            target.profile
           ),
           type: index === 0 ? 'main' : 'alternate',
           // Both halves of the identity travel with the feature — the click
@@ -101,7 +108,12 @@ export function RouteLines() {
         id="routes-line"
         type="line"
         paint={{
-          'line-color': ['get', 'color'],
+          'line-color': [
+            'case',
+            ['get', 'isActive'],
+            ['get', 'activeColor'],
+            ['get', 'color'],
+          ],
           'line-width': ['case', ['get', 'isActive'], 6, 4],
           'line-opacity': ['case', ['get', 'isActive'], 1, 0.6],
         }}

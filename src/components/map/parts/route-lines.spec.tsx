@@ -222,7 +222,12 @@ describe('RouteLines', () => {
         id: 'routes-line',
         type: 'line',
         paint: {
-          'line-color': ['get', 'color'],
+          'line-color': [
+            'case',
+            ['get', 'isActive'],
+            ['get', 'activeColor'],
+            ['get', 'color'],
+          ],
           'line-width': ['case', ['get', 'isActive'], 6, 4],
           'line-opacity': ['case', ['get', 'isActive'], 1, 0.6],
         },
