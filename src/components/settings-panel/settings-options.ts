@@ -612,6 +612,19 @@ const krawanaWrongWayNoEscapeRisk = {
   },
 };
 
+const krawanaSurfaceFactor = {
+  name: 'Krawana Surface Factor',
+  param: 'krawana_surface_factor',
+  description:
+    'How strongly the road surface weighs on the route. 0 ignores the surface entirely, higher values make an emergency vehicle avoid rough ones more. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 0,
+    max: 10,
+    step: 0.1,
+  },
+};
+
 const useDistance = {
   name: 'Use Distance',
   param: 'use_distance',
@@ -1072,6 +1085,7 @@ export const settingsInit = {
   krawana_wrong_way_ramp_risk: 4,
   krawana_wrong_way_turn_channel_risk: 1.5,
   krawana_wrong_way_no_escape_risk: 1.5,
+  krawana_surface_factor: 0.5,
   use_trails: 0,
   denoise: 0.1,
   generalize: 0,
@@ -1234,6 +1248,7 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
       krawanaWrongWayRampRisk,
       krawanaWrongWayTurnChannelRisk,
       krawanaWrongWayNoEscapeRisk,
+      krawanaSurfaceFactor,
     ],
     [...commonVehicleProfileBoolean, ...autoOnlyBoolean],
     [],
