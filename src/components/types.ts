@@ -88,6 +88,9 @@ export interface PossibleSettings {
   krawana_wrong_way_factor: number;
   krawana_wrong_way_risk: number;
   krawana_wrong_way_speed: number;
+  krawana_wrong_way_ramp_risk: number;
+  krawana_wrong_way_turn_channel_risk: number;
+  krawana_wrong_way_no_escape_risk: number;
   use_trails: number;
   denoise: number;
   generalize: number;

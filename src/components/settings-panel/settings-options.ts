@@ -573,6 +573,45 @@ const krawanaWrongWaySpeed = {
   },
 };
 
+const krawanaWrongWayRampRisk = {
+  name: 'Krawana Wrong-Way Ramp Risk',
+  param: 'krawana_wrong_way_ramp_risk',
+  description:
+    'How risky driving the wrong way along a ramp is considered to be. Ramps carry fast merging traffic with poor sightlines, so this starts well above the other wrong-way risks. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 0,
+    max: 100,
+    step: 0.1,
+  },
+};
+
+const krawanaWrongWayTurnChannelRisk = {
+  name: 'Krawana Wrong-Way Turn Channel Risk',
+  param: 'krawana_wrong_way_turn_channel_risk',
+  description:
+    'How risky driving the wrong way through a turn channel (a slip road between two streets) is considered to be. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 0,
+    max: 100,
+    step: 0.1,
+  },
+};
+
+const krawanaWrongWayNoEscapeRisk = {
+  name: 'Krawana Wrong-Way No-Escape Risk',
+  param: 'krawana_wrong_way_no_escape_risk',
+  description:
+    'How risky a wrong-way stretch with no way out is considered to be — one an oncoming vehicle could not pull aside from. Only supported by the emergency costing model on our own Valhalla deployment.',
+  unit: 'factor',
+  settings: {
+    min: 0,
+    max: 100,
+    step: 0.1,
+  },
+};
+
 const useDistance = {
   name: 'Use Distance',
   param: 'use_distance',
@@ -1030,6 +1069,9 @@ export const settingsInit = {
   krawana_wrong_way_factor: 5,
   krawana_wrong_way_risk: 1,
   krawana_wrong_way_speed: 30,
+  krawana_wrong_way_ramp_risk: 4,
+  krawana_wrong_way_turn_channel_risk: 1.5,
+  krawana_wrong_way_no_escape_risk: 1.5,
   use_trails: 0,
   denoise: 0.1,
   generalize: 0,
@@ -1189,6 +1231,9 @@ export const profileSettings: Record<SettingsProfile, SettingsGroup> = {
       krawanaWrongWayFactor,
       krawanaWrongWayRisk,
       krawanaWrongWaySpeed,
+      krawanaWrongWayRampRisk,
+      krawanaWrongWayTurnChannelRisk,
+      krawanaWrongWayNoEscapeRisk,
     ],
     [...commonVehicleProfileBoolean, ...autoOnlyBoolean],
     [],
