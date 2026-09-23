@@ -32,6 +32,7 @@ import { useDirectionsQuery } from '@/hooks/use-directions-queries';
 import { useIsochronesQuery } from '@/hooks/use-isochrones-queries';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { ServerSettings } from '@/components/settings-panel/server-settings';
+import { CostingSettingsIO } from './costing-settings-io';
 import { getTargetColor } from '@/utils/profile-colors';
 import { getProfileLabel } from '@/utils/profiles';
 import { targetKey, type TargetRef } from '@/utils/targets';
@@ -375,6 +376,18 @@ const TargetSection = ({
               onIncludedChange={onIncludedChange}
             />
           </CollapsibleSection>
+        ) : null}
+
+        {/* Emergency only: its fork-specific tuning is worth saving and
+            sharing verbatim, in Valhalla's own param names. */}
+        {target.profile === 'emergency' ? (
+          <CostingSettingsIO
+            target={target}
+            scope={scope}
+            onValueChange={onValueChange}
+            onIncludedChange={onIncludedChange}
+            onCommit={onCommit}
+          />
         ) : null}
       </CollapsibleSection>
     </div>

@@ -1,0 +1,16 @@
+# Runs the prebuilt image from krawana-valhalla-web.tar instead of building
+# from source. Load the tar once before the first `up`:
+#
+#   docker load -i krawana-valhalla-web.tar
+#   docker compose -f docker-compose.image.yml up -d
+#
+services:
+  valhalla-app:
+    image: krawana-valhalla-web:latest
+    # Never reach for a registry — this tag only ever exists locally, so a
+    # missing image should fail loudly rather than pull something unrelated.
+    pull_policy: never
+    container_name: krawana-valhalla-web
+    ports:
+      - '8081:80'
+    restart: unless-stopped
