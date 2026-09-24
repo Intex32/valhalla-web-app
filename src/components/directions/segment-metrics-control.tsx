@@ -27,6 +27,12 @@ export const SegmentMetricsControl = () => {
   const setSegmentMetric = useDirectionsStore(
     (state) => state.setSegmentMetric
   );
+  const showIntersections = useDirectionsStore(
+    (state) => state.showIntersectionCosts
+  );
+  const setShowIntersections = useDirectionsStore(
+    (state) => state.setShowIntersectionCosts
+  );
   const activeMetric =
     SEGMENT_METRICS.find((metric) => metric.id === segmentMetric) ??
     SEGMENT_METRICS[0];
@@ -93,8 +99,23 @@ export const SegmentMetricsControl = () => {
             />
             <span>high</span>
           </div>
+          <div className="flex items-center justify-between gap-2">
+            <Label
+              htmlFor="intersection-costs"
+              className="text-xs font-normal text-muted-foreground"
+            >
+              Intersection costs
+            </Label>
+            <Switch
+              id="intersection-costs"
+              checked={showIntersections}
+              onCheckedChange={setShowIntersections}
+            />
+          </div>
+
           <p className="text-[10px] text-muted-foreground">
-            Selected route only. Click a segment for its exact numbers.
+            Selected route only. Click a segment or junction for its exact
+            numbers.
           </p>
         </>
       )}

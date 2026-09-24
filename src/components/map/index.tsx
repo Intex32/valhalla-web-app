@@ -44,7 +44,13 @@ import {
   RouteSegmentMetrics,
   SEGMENT_METRICS_LAYER_ID,
   SEGMENT_METRICS_HIT_LAYER_ID,
+  TRANSITION_NODES_LAYER_ID,
+  TRANSITION_NODES_HIT_LAYER_ID,
 } from './parts/route-segment-metrics';
+import {
+  IntersectionInfoPopup,
+  type IntersectionInfo,
+} from './parts/intersection-info-popup';
 import { SegmentInfoPopup, type SegmentInfo } from './parts/segment-info-popup';
 import { HighlightSegment } from './parts/highlight-segment';
 import { IsochronePolygons } from './parts/isochrone-polygons';
@@ -147,6 +153,8 @@ export const MapComponent = () => {
     summary: Summary;
   } | null>(null);
   const [segmentPopup, setSegmentPopup] = useState<SegmentInfo | null>(null);
+  const [intersectionPopup, setIntersectionPopup] =
+    useState<IntersectionInfo | null>(null);
   const [tilesPopup, setTilesPopup] = useState<{
     lng: number;
     lat: number;
@@ -610,6 +618,35 @@ export const MapComponent = () => {
         }
       }
 
+      // A junction dot sits on top of the line it belongs to, so it is
+      // matched first — otherwise the segment underneath would always win.
+      const nodeFeature = event.features?.find(
+        (f) =>
+          f.layer?.id === TRANSITION_NODES_LAYER_ID ||
+          f.layer?.id === TRANSITION_NODES_HIT_LAYER_ID
+      );
+
+      if (nodeFeature?.properties) {
+        const props = nodeFeature.properties;
+        setSegmentPopup(null);
+        setIntersectionPopup({
+          // The junction's own coordinate, not the click point: the popup
+          // reports it as the way to find the node in OSM.
+          lng: Number(props.lng),
+          lat: Number(props.lat),
+          cost: Number(props.cost),
+          seconds: Number(props.seconds),
+          intoStreets: String(props.intoStreets ?? ''),
+          intoRoadClass:
+            props.intoRoadClass === null ? null : String(props.intoRoadClass),
+          fromWayId: props.fromWayId === null ? null : Number(props.fromWayId),
+          intoWayId: props.intoWayId === null ? null : Number(props.intoWayId),
+          nodeType: props.nodeType === null ? null : String(props.nodeType),
+          trafficSignal: Boolean(props.trafficSignal),
+        });
+        return;
+      }
+
       // A segment of the selected route: show its exact numbers. Checked
       // before the route line, whose feature is underneath it.
       const segmentFeature = event.features?.find(
@@ -620,6 +657,7 @@ export const MapComponent = () => {
 
       if (segmentFeature?.properties) {
         const props = segmentFeature.properties;
+        setIntersectionPopup(null);
         setSegmentPopup({
           lng: event.lngLat.lng,
           lat: event.lngLat.lat,
@@ -628,6 +666,14 @@ export const MapComponent = () => {
           length: Number(props.length),
           time: Number(props.time),
           cost: Number(props.cost),
+          edgeId: props.edgeId === null ? null : Number(props.edgeId),
+          wayId: props.wayId === null ? null : Number(props.wayId),
+          roadClass: props.roadClass === null ? null : String(props.roadClass),
+          speed: props.speed === null ? null : Number(props.speed),
+          transitionTime:
+            props.transitionTime === null ? null : Number(props.transitionTime),
+          transitionCost:
+            props.transitionCost === null ? null : Number(props.transitionCost),
         });
         return;
       }
@@ -901,6 +947,8 @@ export const MapComponent = () => {
                 VALHALLA_ACCESS_RESTRICTIONS_TIMED_LAYER_ID,
               ]
             : [
+                TRANSITION_NODES_LAYER_ID,
+                TRANSITION_NODES_HIT_LAYER_ID,
                 SEGMENT_METRICS_LAYER_ID,
                 SEGMENT_METRICS_HIT_LAYER_ID,
                 'routes-line',
@@ -989,6 +1037,15 @@ export const MapComponent = () => {
               }}
             />
           </Popup>
+        )}
+
+        {intersectionPopup && (
+          <IntersectionInfoPopup
+            info={intersectionPopup}
+            onClose={() => {
+              setIntersectionPopup(null);
+            }}
+          />
         )}
 
         {segmentPopup && (

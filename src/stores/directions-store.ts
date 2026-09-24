@@ -123,6 +123,11 @@ export interface DirectionsState {
    * only ever applies to the selected route.
    */
   segmentMetric: SegmentMetricId | null;
+  /**
+   * Whether to dot the selected route's junctions with their transition cost.
+   * Needs the per-edge trace, so it only shows once that has come back.
+   */
+  showIntersectionCosts: boolean;
 }
 
 interface DirectionsActions {
@@ -158,6 +163,7 @@ interface DirectionsActions {
   setIsOptimized: (isOptimized: boolean) => void;
   setActiveRoute: (route: RouteRef) => void;
   setSegmentMetric: (metric: SegmentMetricId | null) => void;
+  setShowIntersectionCosts: (show: boolean) => void;
 }
 
 type DirectionsStore = DirectionsState & DirectionsActions;
@@ -174,6 +180,7 @@ export const useDirectionsStore = create<DirectionsStore>()(
       isOptimized: false,
       activeRoute: null,
       segmentMetric: null,
+      showIntersectionCosts: true,
 
       updateInclineDecline: (inclineDeclineTotal) =>
         set(
@@ -426,6 +433,15 @@ export const useDirectionsStore = create<DirectionsStore>()(
           },
           undefined,
           'setSegmentMetric'
+        ),
+
+      setShowIntersectionCosts: (show) =>
+        set(
+          (state) => {
+            state.showIntersectionCosts = show;
+          },
+          undefined,
+          'setShowIntersectionCosts'
         ),
     })),
     { name: 'directions-store' }

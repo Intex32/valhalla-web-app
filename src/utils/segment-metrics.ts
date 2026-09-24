@@ -89,37 +89,40 @@ export const SEGMENT_METRICS: SegmentMetric[] = [
 export const getSegmentMetric = (id: SegmentMetricId): SegmentMetric =>
   SEGMENT_METRICS.find((metric) => metric.id === id) ?? SEGMENT_METRICS[0]!;
 
-/** Stubs shorter than this, in km, do not get to define the ramp's ends. */
-const MIN_RAMP_LENGTH_KM = 0.05;
-/** …nor do segments shorter than this share of the route. */
-const MIN_RAMP_LENGTH_SHARE = 0.02;
+/** Share of the segments trimmed off each end of the ramp. */
+const RAMP_TRIM = 0.05;
 
 /**
- * The value range the colour ramp spans.
+ * The value range the colour ramp spans: the 5th to 95th percentile of the
+ * segments' values, with everything outside clamped to the ends.
  *
- * A route's last maneuver is typically a stub of a few dozen metres carrying
- * the fixed cost of arriving — 41 m at 341 cost/km where the rest of the route
- * sits between 61 and 214. Every per-km metric explodes on a segment that
- * short, so a plain min/max let the tail define the top of the scale on every
- * route and squashed the real variation into the bottom half of the ramp.
+ * A plain min/max is wrecked by one outlier, and a route reliably has one —
+ * the last maneuver is a stub of a few dozen metres carrying the fixed cost of
+ * arriving, 41 m at 341 cost/km where the rest of the route sits between 61
+ * and 214. Trimming the extremes handles that without the scale having to know
+ * what a stub is.
  *
- * Stubs are therefore excluded from the ends of the scale, but still painted:
- * values outside the range clamp to the extremes, so the arrival stub stays
- * red — it just no longer decides what red means.
+ * The trim rounds *inward* (`ceil` at the bottom, `floor` at the top) so it
+ * always drops at least one segment from each end. Rounding to nearest would
+ * trim nothing at all on a ten-maneuver route, which is exactly the case that
+ * needs it.
+ *
+ * An earlier version excluded segments under 50 m from the scale instead. That
+ * made sense while transition costs were folded into short edges, but once
+ * junctions became their own nodes it only did harm: at edge granularity it
+ * dropped 226 of 314 segments, leaving the scale to the long motorway edges
+ * and collapsing the speed ramp to 50–60 km/h, where a third of the route
+ * clamped and the colours stopped tracking the values.
  */
-export const rampDomain = (
-  values: number[],
-  lengths: number[]
-): [number, number] => {
-  const total = lengths.reduce((sum, length) => sum + length, 0);
-  const floor = Math.max(MIN_RAMP_LENGTH_KM, total * MIN_RAMP_LENGTH_SHARE);
+export const rampDomain = (values: number[]): [number, number] => {
+  // Copy before sorting: this array is indexed by segment downstream.
+  const scale = [...values].sort((a, b) => a - b);
+  const last = scale.length - 1;
 
-  const substantial = values.filter(
-    (_, index) => (lengths[index] ?? 0) >= floor
-  );
-  // A route made entirely of stubs has nothing left to scale against.
-  const scale = substantial.length >= 2 ? substantial : values;
+  const low = scale[Math.ceil(RAMP_TRIM * last)] ?? 0;
+  const high = scale[Math.floor((1 - RAMP_TRIM) * last)] ?? 0;
 
+  if (high > low) return [low, high];
   return [Math.min(...scale), Math.max(...scale)];
 };
 

@@ -1,7 +1,7 @@
 import React from 'react';
 
 import type { Leg } from '@/components/types';
-import { Clock, MoveHorizontal, DollarSign, Ship } from 'lucide-react';
+import { Clock, MoveHorizontal, DollarSign, Ship, Coins } from 'lucide-react';
 import { MetricItem } from '@/components/ui/metric-item';
 import { RouteAttributes } from '@/components/ui/route-attributes';
 import { formatDuration } from '@/utils/date-time';
@@ -87,6 +87,15 @@ export const Maneuvers = ({ legs, target, index }: ManeuversProps) => {
                         icon={Clock}
                         label="Time"
                         value={formatDuration(mnv.time)}
+                        variant="outline"
+                      />
+                      {/* The costing model's own number for this manoeuvre.
+                          Unitless, and only comparable within one costing
+                          model — see the route summary. */}
+                      <MetricItem
+                        icon={Coins}
+                        label="Cost"
+                        value={mnv.cost.toFixed(mnv.cost >= 100 ? 0 : 1)}
                         variant="outline"
                       />
                     </div>
