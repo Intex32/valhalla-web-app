@@ -70,12 +70,17 @@ const targetGroup = (target: TargetRef): SettingsGroup => {
 };
 
 /**
- * The fork-specific knobs are the whole point of the `emergency` profile, so
- * they stay in view while the inherited `auto` options fold away. `top_speed`
- * rides along: an emergency vehicle's top speed is tuned together with them.
+ * Options pinned above the fold on the `emergency` profile: the fork-specific
+ * knobs, which are the whole point of it, plus two inherited ones that get
+ * tuned alongside them — `top_speed` and `disable_hierarchy_pruning`.
  */
+const PINNED_EMERGENCY_PARAMS = new Set([
+  'top_speed',
+  'disable_hierarchy_pruning',
+]);
+
 const isKrawanaParam = (param: string) =>
-  param.startsWith('krawana_') || param === 'top_speed';
+  param.startsWith('krawana_') || PINNED_EMERGENCY_PARAMS.has(param);
 
 /** Splits a group into the options matching `predicate` and everything else. */
 const partitionGroup = (
