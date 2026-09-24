@@ -225,10 +225,30 @@ export const useDirectionsStore = create<DirectionsStore>()(
 
             const first = results[0];
 
+            // Keep the selection on the same target across a re-route, so
+            // dragging a waypoint while comparing two servers does not throw
+            // the user back to the first one's main route. The alternates are
+            // recomputed, so the index is clamped to what this target now has.
+            const previous = state.activeRoute;
+            const stillPresent = previous
+              ? results.find((result) => sameTarget(result.target, previous))
+              : undefined;
+
             state.successful = results.length > 0;
             state.inclineDeclineTotal = undefined;
             state.results = { byTarget: results, failures, show };
-            state.activeRoute = first ? { ...first.target, index: 0 } : null;
+
+            if (previous && stillPresent) {
+              state.activeRoute = {
+                ...stillPresent.target,
+                index: Math.min(
+                  previous.index,
+                  stillPresent.data.alternates?.length ?? 0
+                ),
+              };
+            } else {
+              state.activeRoute = first ? { ...first.target, index: 0 } : null;
+            }
           },
           undefined,
           'receiveRouteResults'
