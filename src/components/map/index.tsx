@@ -40,6 +40,12 @@ import {
 } from './constants';
 import type { MapStyleType } from './types';
 import { RouteLines } from './parts/route-lines';
+import {
+  RouteSegmentMetrics,
+  SEGMENT_METRICS_LAYER_ID,
+  SEGMENT_METRICS_HIT_LAYER_ID,
+} from './parts/route-segment-metrics';
+import { SegmentInfoPopup, type SegmentInfo } from './parts/segment-info-popup';
 import { HighlightSegment } from './parts/highlight-segment';
 import { IsochronePolygons } from './parts/isochrone-polygons';
 import { IsochroneLocations } from './parts/isochrone-locations';
@@ -140,6 +146,7 @@ export const MapComponent = () => {
     lat: number;
     summary: Summary;
   } | null>(null);
+  const [segmentPopup, setSegmentPopup] = useState<SegmentInfo | null>(null);
   const [tilesPopup, setTilesPopup] = useState<{
     lng: number;
     lat: number;
@@ -603,6 +610,28 @@ export const MapComponent = () => {
         }
       }
 
+      // A segment of the selected route: show its exact numbers. Checked
+      // before the route line, whose feature is underneath it.
+      const segmentFeature = event.features?.find(
+        (f) =>
+          f.layer?.id === SEGMENT_METRICS_LAYER_ID ||
+          f.layer?.id === SEGMENT_METRICS_HIT_LAYER_ID
+      );
+
+      if (segmentFeature?.properties) {
+        const props = segmentFeature.properties;
+        setSegmentPopup({
+          lng: event.lngLat.lng,
+          lat: event.lngLat.lat,
+          streets: String(props.streets ?? ''),
+          instruction: String(props.instruction ?? ''),
+          length: Number(props.length),
+          time: Number(props.time),
+          cost: Number(props.cost),
+        });
+        return;
+      }
+
       // Check if click is on a route line (hit-target layer is the wider,
       // transparent stand-in for routes-line — same source/properties).
       const routeFeature = event.features?.find(
@@ -871,7 +900,12 @@ export const MapComponent = () => {
                 VALHALLA_ACCESS_RESTRICTIONS_PERMANENT_LAYER_ID,
                 VALHALLA_ACCESS_RESTRICTIONS_TIMED_LAYER_ID,
               ]
-            : ['routes-line', 'routes-hit-target']
+            : [
+                SEGMENT_METRICS_LAYER_ID,
+                SEGMENT_METRICS_HIT_LAYER_ID,
+                'routes-line',
+                'routes-hit-target',
+              ]
         }
         mapStyle={resolvedMapStyle}
         style={{ width: '100%', height: '100vh' }}
@@ -890,6 +924,7 @@ export const MapComponent = () => {
           onCustomStyleLoaded={handleCustomStyleLoaded}
         />
         <RouteLines />
+        <RouteSegmentMetrics />
         <HighlightSegment />
         <IsochronePolygons />
         <IsochroneLocations />
@@ -954,6 +989,15 @@ export const MapComponent = () => {
               }}
             />
           </Popup>
+        )}
+
+        {segmentPopup && (
+          <SegmentInfoPopup
+            info={segmentPopup}
+            onClose={() => {
+              setSegmentPopup(null);
+            }}
+          />
         )}
 
         {routeHoverPopup && (

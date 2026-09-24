@@ -18,6 +18,7 @@ import { getTargetColor } from '@/utils/profile-colors';
 import { getProfileLabel } from '@/utils/profiles';
 import { sameTarget, targetKey, type TargetRef } from '@/utils/targets';
 import { InstanceResultsGroup } from '@/components/instance-results-group';
+import { SegmentMetricsControl } from './segment-metrics-control';
 import { ExportWaypointsButton } from './export-waypoints-button';
 import {
   useDirectionsQuery,
@@ -188,6 +189,9 @@ export const DirectionsControl = () => {
       {instanceGroups.length > 0 && (
         <div>
           <h3 className="font-bold mb-2">Directions</h3>
+          <div className="mb-3">
+            <SegmentMetricsControl />
+          </div>
           <div className="flex flex-col gap-4">
             {instanceGroups.map(({ instance, entries, failures }) => (
               <InstanceResultsGroup

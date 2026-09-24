@@ -11,6 +11,7 @@ import {
   MoveHorizontal,
   Ship,
   ArrowDown,
+  Coins,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -120,6 +121,14 @@ export const Summary = ({
       icon: Clock,
       label: 'Route duration',
       value: formatDuration(summary.time),
+    },
+    {
+      // The costing model's own number. Unitless and only comparable between
+      // routes from the same costing model, which is exactly what the panel
+      // puts side by side.
+      icon: Coins,
+      label: 'Route cost',
+      value: summary.cost.toFixed(summary.cost >= 100 ? 0 : 1),
     },
     ...(inclineDeclineTotal
       ? [
