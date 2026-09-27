@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`valhalla-web` (package name) is the ReactJS demo app that runs on https://valhalla.openstreetmap.de. It is a SPA frontend over the [Valhalla](https://github.com/valhalla/valhalla/CLAUDE.md) routing engine — it builds Valhalla `/route`, `/isochrone`, `/locate`, and `/height` requests and renders results on a MapLibre map. There is no backend in this repo.
+`valhalla-web` (package name) is a **fork** of the ReactJS demo app that runs on https://valhalla.openstreetmap.de (diverges at upstream `cd95462`). [`docs/`](docs/README.md) is the feature-level tour of what the fork adds and why; this file is the implementation detail. Keep both current. It is a SPA frontend over the [Valhalla](https://github.com/valhalla/valhalla/CLAUDE.md) routing engine — it builds Valhalla `/route`, `/isochrone`, `/locate`, and `/height` requests and renders results on a MapLibre map. There is no backend in this repo.
 
 ## Commands
 

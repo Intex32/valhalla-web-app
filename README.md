@@ -4,6 +4,8 @@
 
 This is the ReactJS demo web app running on https://valhalla.openstreetmap.de. It provides routing and isochrones with a magnitude of options and makes requests to [Valhalla](https://github.com/valhalla/valhalla), an open source routing engine and accompanying libraries for use with OpenStreetMap data.
 
+> **This is a fork.** It adds multi-server and multi-profile comparison, the fork-specific `emergency` costing model with its `krawana_*` options, and per-edge / per-junction cost visualisation for debugging that model. See **[docs/](docs/README.md)** for what we changed and why. It expects a Valhalla built from our fork — see the requirements in that index.
+
 ## Commands
 
 ### `npm install`
