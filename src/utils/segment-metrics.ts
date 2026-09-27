@@ -19,8 +19,21 @@ export type SegmentMetricId =
   | 'speed'
   | 'cost_per_second';
 
+/**
+ * What the junction dots encode while a metric is shown.
+ *
+ * A transition is a cost charged at a point — it has no length, so most of the
+ * segment metrics have no junction equivalent at all. Only the two that share
+ * a direction with a junction quantity get one: cost/km pairs with transition
+ * cost, and time/km with transition time (higher means a slower journey in
+ * both cases). For the rest the dots stay plain: still there, still clickable,
+ * just not pretending to carry a value.
+ */
+export type IntersectionEncoding = 'cost' | 'time' | 'none';
+
 export interface SegmentMetric {
   id: SegmentMetricId;
+  intersection: IntersectionEncoding;
   label: string;
   unit: string;
   description: string;
@@ -49,6 +62,7 @@ const perKm = (value: number, length: number) =>
 export const SEGMENT_METRICS: SegmentMetric[] = [
   {
     id: 'cost_per_km',
+    intersection: 'cost',
     label: 'Cost / km',
     unit: 'cost/km',
     description:
@@ -58,6 +72,7 @@ export const SEGMENT_METRICS: SegmentMetric[] = [
   },
   {
     id: 'time_per_km',
+    intersection: 'time',
     label: 'Time / km',
     unit: 's/km',
     description:
@@ -67,6 +82,7 @@ export const SEGMENT_METRICS: SegmentMetric[] = [
   },
   {
     id: 'speed',
+    intersection: 'none',
     label: 'Speed',
     unit: 'km/h',
     description:
@@ -77,6 +93,7 @@ export const SEGMENT_METRICS: SegmentMetric[] = [
   },
   {
     id: 'cost_per_second',
+    intersection: 'none',
     label: 'Cost / time',
     unit: 'cost/s',
     description:
@@ -88,43 +105,6 @@ export const SEGMENT_METRICS: SegmentMetric[] = [
 
 export const getSegmentMetric = (id: SegmentMetricId): SegmentMetric =>
   SEGMENT_METRICS.find((metric) => metric.id === id) ?? SEGMENT_METRICS[0]!;
-
-/** Share of the segments trimmed off each end of the ramp. */
-const RAMP_TRIM = 0.05;
-
-/**
- * The value range the colour ramp spans: the 5th to 95th percentile of the
- * segments' values, with everything outside clamped to the ends.
- *
- * A plain min/max is wrecked by one outlier, and a route reliably has one —
- * the last maneuver is a stub of a few dozen metres carrying the fixed cost of
- * arriving, 41 m at 341 cost/km where the rest of the route sits between 61
- * and 214. Trimming the extremes handles that without the scale having to know
- * what a stub is.
- *
- * The trim rounds *inward* (`ceil` at the bottom, `floor` at the top) so it
- * always drops at least one segment from each end. Rounding to nearest would
- * trim nothing at all on a ten-maneuver route, which is exactly the case that
- * needs it.
- *
- * An earlier version excluded segments under 50 m from the scale instead. That
- * made sense while transition costs were folded into short edges, but once
- * junctions became their own nodes it only did harm: at edge granularity it
- * dropped 226 of 314 segments, leaving the scale to the long motorway edges
- * and collapsing the speed ramp to 50–60 km/h, where a third of the route
- * clamped and the colours stopped tracking the values.
- */
-export const rampDomain = (values: number[]): [number, number] => {
-  // Copy before sorting: this array is indexed by segment downstream.
-  const scale = [...values].sort((a, b) => a - b);
-  const last = scale.length - 1;
-
-  const low = scale[Math.ceil(RAMP_TRIM * last)] ?? 0;
-  const high = scale[Math.floor((1 - RAMP_TRIM) * last)] ?? 0;
-
-  if (high > low) return [low, high];
-  return [Math.min(...scale), Math.max(...scale)];
-};
 
 /**
  * Cuts a route's shape into one feature-ready piece per maneuver.
