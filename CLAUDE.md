@@ -27,7 +27,7 @@ npm run check          # prettier:check && lint  (run before opening a PR)
 npm run check:deps     # taze: list outdated deps interactively
 ```
 
-Husky `pre-commit` runs `npm run typecheck && npx lint-staged` (eslint --fix on `*.{js,jsx,ts,tsx}`, prettier on `*.{json,md,scss,yaml,yml}`). CI (`.github/workflows/playwright.yml`) runs typecheck → lint → vitest → playwright (chromium only) on every PR.
+Husky `pre-commit` runs `npm run typecheck && npx lint-staged` (eslint --fix on `*.{js,jsx,ts,tsx}`, prettier on `*.{json,md,scss,yaml,yml}`). CI (`.github/workflows/playwright.yml`) runs typecheck → lint → vitest → playwright (chromium only); its PR trigger is disabled in this fork, so it only runs when started by hand.
 
 ## Tech stack
 
@@ -163,10 +163,10 @@ All build-time, prefixed `VITE_`. Defined in `.env`, typed in `src/vite-env.d.ts
 
 ## Deployment
 
-- **Production** (`.github/workflows/deploy.yml`): on push to `master`, builds with `VITE_CLIENT_ID=public-web-app` (written to `.env.production.local`) and rsyncs `./build/` to the host server over SSH.
-- **PR previews**: `preview-build.yml` rewrites the `homepage` field in `package.json` to `https://valhalla-app-tests.gis-ops.com/<PR#>` before building; `preview-deploy.yml` consumes that artifact, generates an `.htaccess` for SPA rewrites, rsyncs to `<host>/<PR#>/`, posts a status check, and comments the URL. `preview-cleanup.yml` removes the directory when the PR closes.
-- **Docker** (`Dockerfile` + `docker-compose.yml`): node:24-alpine builder -> nginx:1.29-alpine serving `./build` on port 80. The Dockerfile accepts `VITE_VALHALLA_URL`, `VITE_CLIENT_ID`, and `VITE_DEFAULT_COSTING_MODEL` as build arguments. `.github/workflows/publish-staging-image.yml` publishes the manually selected Krawana revision as an immutable `linux/amd64` GHCR image and verifies the compiled staging URL.
-- The `npm run deploy` script (`gh-pages`) is defined but **not** used by any workflow — production goes via rsync.
+- **Krawana staging** (the only deployment in use): the UI ships only via the manual "Publish Krawana staging image" workflow (`.github/workflows/publish-staging-image.yml`), which publishes the selected revision as an immutable `linux/amd64` GHCR image and verifies the compiled staging URL. The Krawana repo's "Deploy staging" workflow then rolls it out via its `valhalla_ui_image` input; see `docs/deployment.md` in Intex32/krawana, section "Deploying a new diagnostic UI".
+- **Disabled workflows**: tests/lint (`playwright.yml`) and the upstream PR previews (`preview-build.yml`, `preview-deploy.yml`, `preview-cleanup.yml`; they need upstream secrets) have their automatic triggers commented out and keep only `workflow_dispatch`. Uncomment the triggers to re-enable them.
+- **Docker** (`Dockerfile` + `docker-compose.yml`): node:24-alpine builder -> nginx:1.29-alpine serving `./build` on port 80. The Dockerfile accepts `VITE_VALHALLA_URL`, `VITE_CLIENT_ID`, and `VITE_DEFAULT_COSTING_MODEL` as build arguments.
+- The `npm run deploy` script (`gh-pages`) is defined but **not** used by any workflow.
 
 ## Working with this team
 
