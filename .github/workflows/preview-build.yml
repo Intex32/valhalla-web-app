@@ -1,14 +1,16 @@
 name: PR Preview Build
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-    branches:
-      - 'master'
-    paths-ignore:
-      - '**.md'
-      - 'docker*'
-      - 'Docker*'
+  # Disabled in this fork for now; uncomment to run again.
+  #   pull_request:
+  #     types: [opened, reopened, synchronize]
+  #     branches:
+  #       - 'master'
+  #     paths-ignore:
+  #       - '**.md'
+  #       - 'docker*'
+  #       - 'Docker*'
+  workflow_dispatch:
 
 jobs:
   build:

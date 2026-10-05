@@ -1,9 +1,11 @@
 name: PR Preview Deploy
 
 on:
-  workflow_run:
-    workflows: ['PR Preview Build']
-    types: [completed]
+  # Disabled in this fork for now; uncomment to run again.
+  #   workflow_run:
+  #     workflows: ['PR Preview Build']
+  #     types: [completed]
+  workflow_dispatch:
 
 jobs:
   deploy:
