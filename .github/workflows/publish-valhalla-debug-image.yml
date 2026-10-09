@@ -1,4 +1,4 @@
-name: Publish Krawana image
+name: Publish valhalla-debug image
 
 on:
   workflow_dispatch:
@@ -42,9 +42,9 @@ jobs:
           esac
           revision="$(git rev-parse HEAD)"
           echo "revision=${revision}" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/intex32/valhalla-web-app:${ENVIRONMENT}-${revision}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/intex32/krawana-valhalla-debug:${ENVIRONMENT}-${revision}" >> "$GITHUB_OUTPUT"
           echo "valhalla-url=https://valhalla-${ENVIRONMENT}.heimann.dev" >> "$GITHUB_OUTPUT"
-          echo "client-id=krawana-${ENVIRONMENT}-web-app" >> "$GITHUB_OUTPUT"
+          echo "client-id=krawana-${ENVIRONMENT}-valhalla-debug" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -78,7 +78,7 @@ jobs:
           EXPECTED_REVISION: ${{ steps.metadata.outputs.revision }}
           EXPECTED_VALHALLA_URL: ${{ steps.metadata.outputs.valhalla-url }}
           EXPECTED_CLIENT_ID: ${{ steps.metadata.outputs.client-id }}
-          IMAGE: ghcr.io/intex32/valhalla-web-app@${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/intex32/krawana-valhalla-debug@${{ steps.build.outputs.digest }}
         shell: bash
         run: |
           docker pull "$IMAGE"
@@ -133,10 +133,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Published Krawana Valhalla UI image ($ENVIRONMENT)"
+            echo "### Published Valhalla debug UI image ($ENVIRONMENT)"
             echo
             echo "- Source revision: \`$REVISION\`"
             echo "- Image tag: \`$IMAGE\`"
-            echo "- Deployment reference: \`ghcr.io/intex32/valhalla-web-app@$DIGEST\`"
+            echo "- Deployment reference: \`ghcr.io/intex32/krawana-valhalla-debug@$DIGEST\`"
             echo "- Valhalla URL: \`$VALHALLA_URL\`"
           } >> "$GITHUB_STEP_SUMMARY"
