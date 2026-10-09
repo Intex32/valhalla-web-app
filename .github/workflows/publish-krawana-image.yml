@@ -1,12 +1,19 @@
-name: Publish Krawana staging image
+name: Publish Krawana image
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: Krawana environment whose Valhalla URL and client id are compiled in
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
       ref:
         description: Git ref or full commit SHA to build
         required: true
-        default: stage1-staging-image
+        default: krawana
 
 permissions:
   contents: read
@@ -25,11 +32,19 @@ jobs:
 
       - name: Resolve image metadata
         id: metadata
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
         shell: bash
         run: |
+          case "$ENVIRONMENT" in
+            staging | prod) ;;
+            *) echo "Unknown environment: $ENVIRONMENT" >&2; exit 1 ;;
+          esac
           revision="$(git rev-parse HEAD)"
           echo "revision=${revision}" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/intex32/valhalla-web-app:${revision}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/intex32/valhalla-web-app:${ENVIRONMENT}-${revision}" >> "$GITHUB_OUTPUT"
+          echo "valhalla-url=https://valhalla-${ENVIRONMENT}.heimann.dev" >> "$GITHUB_OUTPUT"
+          echo "client-id=krawana-${ENVIRONMENT}-web-app" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -52,8 +67,8 @@ jobs:
           tags: ${{ steps.metadata.outputs.image }}
           build-args: |
             SOURCE_REVISION=${{ steps.metadata.outputs.revision }}
-            VITE_VALHALLA_URL=https://valhalla-staging.heimann.dev
-            VITE_CLIENT_ID=krawana-staging-web-app
+            VITE_VALHALLA_URL=${{ steps.metadata.outputs.valhalla-url }}
+            VITE_CLIENT_ID=${{ steps.metadata.outputs.client-id }}
             VITE_DEFAULT_COSTING_MODEL=emergency
           cache-from: type=gha,scope=valhalla-web-app-amd64
           cache-to: type=gha,mode=max,scope=valhalla-web-app-amd64
@@ -61,6 +76,8 @@ jobs:
       - name: Verify image
         env:
           EXPECTED_REVISION: ${{ steps.metadata.outputs.revision }}
+          EXPECTED_VALHALLA_URL: ${{ steps.metadata.outputs.valhalla-url }}
+          EXPECTED_CLIENT_ID: ${{ steps.metadata.outputs.client-id }}
           IMAGE: ghcr.io/intex32/valhalla-web-app@${{ steps.build.outputs.digest }}
         shell: bash
         run: |
@@ -77,17 +94,17 @@ jobs:
           valhalla_url="$(docker image inspect \
             --format '{{ index .Config.Labels "dev.heimann.valhalla-url" }}' \
             "$IMAGE")"
-          test "$valhalla_url" = "https://valhalla-staging.heimann.dev"
+          test "$valhalla_url" = "$EXPECTED_VALHALLA_URL"
 
           client_id="$(docker image inspect \
             --format '{{ index .Config.Labels "dev.heimann.client-id" }}' \
             "$IMAGE")"
-          test "$client_id" = "krawana-staging-web-app"
+          test "$client_id" = "$EXPECTED_CLIENT_ID"
 
           docker run --rm --entrypoint grep "$IMAGE" \
-            -RFl https://valhalla-staging.heimann.dev /usr/share/nginx/html
+            -RFl "$EXPECTED_VALHALLA_URL" /usr/share/nginx/html
           docker run --rm --entrypoint grep "$IMAGE" \
-            -RFl krawana-staging-web-app /usr/share/nginx/html
+            -RFl "$EXPECTED_CLIENT_ID" /usr/share/nginx/html
 
           docker run --detach --rm --name valhalla-ui-smoke \
             --publish 127.0.0.1:18080:80 "$IMAGE"
@@ -111,13 +128,15 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
           IMAGE: ${{ steps.metadata.outputs.image }}
           REVISION: ${{ steps.metadata.outputs.revision }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          VALHALLA_URL: ${{ steps.metadata.outputs.valhalla-url }}
         shell: bash
         run: |
           {
-            echo "### Published Krawana Valhalla UI image"
+            echo "### Published Krawana Valhalla UI image ($ENVIRONMENT)"
             echo
             echo "- Source revision: \`$REVISION\`"
             echo "- Image tag: \`$IMAGE\`"
             echo "- Deployment reference: \`ghcr.io/intex32/valhalla-web-app@$DIGEST\`"
-            echo "- Valhalla URL: \`https://valhalla-staging.heimann.dev\`"
+            echo "- Valhalla URL: \`$VALHALLA_URL\`"
           } >> "$GITHUB_STEP_SUMMARY"
