@@ -42,6 +42,9 @@ jobs:
           esac
           revision="$(git rev-parse HEAD)"
           echo "revision=${revision}" >> "$GITHUB_OUTPUT"
+          # Committer date of the checked-out commit and build time, both in UTC.
+          echo "commit-date=$(TZ=UTC0 git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/intex32/krawana-valhalla-debug:${ENVIRONMENT}-${revision}" >> "$GITHUB_OUTPUT"
           echo "valhalla-url=https://valhalla-${ENVIRONMENT}.heimann.dev" >> "$GITHUB_OUTPUT"
           echo "client-id=krawana-${ENVIRONMENT}-valhalla-debug" >> "$GITHUB_OUTPUT"
@@ -65,6 +68,10 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.metadata.outputs.image }}
+          # The Dockerfile sets the source and revision labels.
+          labels: |
+            org.opencontainers.image.created=${{ steps.metadata.outputs.created }}
+            dev.heimann.commit-date=${{ steps.metadata.outputs.commit-date }}
           build-args: |
             SOURCE_REVISION=${{ steps.metadata.outputs.revision }}
             VITE_VALHALLA_URL=${{ steps.metadata.outputs.valhalla-url }}
