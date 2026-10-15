@@ -46,7 +46,7 @@ jobs:
           echo "commit-date=$(TZ=UTC0 git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/intex32/krawana-valhalla-debug:${ENVIRONMENT}-${revision}" >> "$GITHUB_OUTPUT"
-          echo "valhalla-url=https://valhalla-${ENVIRONMENT}.heimann.dev" >> "$GITHUB_OUTPUT"
+          echo "valhalla-url=https://valhalla-${ENVIRONMENT}.blaulichtnavi.de" >> "$GITHUB_OUTPUT"
           echo "client-id=krawana-${ENVIRONMENT}-valhalla-debug" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
