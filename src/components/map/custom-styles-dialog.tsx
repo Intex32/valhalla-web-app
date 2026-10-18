@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import type maplibregl from 'maplibre-gl';
 import {
@@ -19,9 +19,19 @@ import {
 } from '../ui/field';
 import { FolderIcon, LoaderIcon } from 'lucide-react';
 import { Input } from '../ui/input';
-import { CUSTOM_STYLE_STORAGE_KEY, MAP_STYLE_STORAGE_KEY } from './constants';
+import { saveCustomStyleSpec, saveCustomStyleUrl } from './utils';
 
-const styleUrlSchema = z.string().url('Please enter a valid URL');
+// A same-origin path is as valid a style source as an absolute URL, and it is
+// the only way to reach a style behind the dev proxy or one we bundle.
+const styleUrlSchema = z
+  .string()
+  .trim()
+  .min(1, 'Please enter a URL')
+  .refine(
+    (value) =>
+      value.startsWith('/') || z.string().url().safeParse(value).success,
+    'Enter an absolute URL, or a path starting with /'
+  );
 
 const mapStyleSchema = z.object({
   version: z.number(),
@@ -31,24 +41,35 @@ const mapStyleSchema = z.object({
 });
 
 interface CustomStylesDialogProps {
+  /** URL of the custom style in use, prefilled so it can be edited by hand. */
+  currentStyleUrl?: string | null;
   onStyleLoaded?: (styleData: maplibregl.StyleSpecification) => void;
+  onStyleUrlLoaded?: (url: string, name?: string) => void;
 }
 
 export const CustomStylesDialog = ({
+  currentStyleUrl,
   onStyleLoaded,
+  onStyleUrlLoaded,
 }: CustomStylesDialogProps) => {
-  const [styleUrl, setStyleUrl] = useState('');
+  const [styleUrl, setStyleUrl] = useState(currentStyleUrl ?? '');
   const [styleUrlError, setStyleUrlError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const saveStyleAndNotify = (styleJson: maplibregl.StyleSpecification) => {
-    localStorage.setItem(CUSTOM_STYLE_STORAGE_KEY, JSON.stringify(styleJson));
-    localStorage.setItem(MAP_STYLE_STORAGE_KEY, 'custom');
+  // Reopening should show the URL actually in use, not whatever was typed last.
+  useEffect(() => {
+    if (dialogOpen) {
+      setStyleUrl(currentStyleUrl ?? '');
+      setStyleUrlError(null);
+    }
+  }, [dialogOpen, currentStyleUrl]);
+
+  const saveSpecAndNotify = (styleJson: maplibregl.StyleSpecification) => {
+    saveCustomStyleSpec(styleJson);
     onStyleLoaded?.(styleJson);
     setDialogOpen(false);
-    setStyleUrl('');
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,7 +86,7 @@ export const CustomStylesDialog = ({
         return;
       }
 
-      saveStyleAndNotify(json as maplibregl.StyleSpecification);
+      saveSpecAndNotify(json as maplibregl.StyleSpecification);
     } catch {
       setStyleUrlError('Failed to parse JSON file');
     }
@@ -79,12 +100,13 @@ export const CustomStylesDialog = ({
       );
       return;
     }
+    const trimmedUrl = urlResult.data;
 
     setIsLoading(true);
     setStyleUrlError(null);
 
     try {
-      const response = await fetch(styleUrl, {
+      const response = await fetch(trimmedUrl, {
         mode: 'cors',
         credentials: 'same-origin',
       });
@@ -101,7 +123,12 @@ export const CustomStylesDialog = ({
         return;
       }
 
-      saveStyleAndNotify(json as maplibregl.StyleSpecification);
+      // Only fetched to validate and to learn the style's name — the URL is
+      // what gets stored, so MapLibre refetches it and server-side edits land.
+      const { name } = json as maplibregl.StyleSpecification;
+      saveCustomStyleUrl(trimmedUrl, name);
+      onStyleUrlLoaded?.(trimmedUrl, name);
+      setDialogOpen(false);
     } catch (error) {
       setStyleUrlError(
         error instanceof Error ? error.message : 'Failed to fetch style'
@@ -115,21 +142,22 @@ export const CustomStylesDialog = ({
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>
         <Button className="w-full" variant="outline">
-          Load custom styles
+          {currentStyleUrl ? 'Edit custom style URL' : 'Load custom styles'}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Custom styles</DialogTitle>
           <DialogDescription>
-            With this option, you can load custom styles from a URL or a local
-            file.
+            Point the map at any MapLibre style.json by URL, or load one from a
+            local file.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup className="gap-4">
           <Field className="gap-2" data-invalid={!!styleUrlError}>
-            <FieldLabel htmlFor="style-url">Load from URL</FieldLabel>
+            <FieldLabel htmlFor="style-url">Style URL</FieldLabel>
             <FieldDescription>
+              Fetched fresh on every load, so edits on the style server show up.
               URL must have{' '}
               <a
                 href="https://enable-cors.org/"
@@ -158,7 +186,7 @@ export const CustomStylesDialog = ({
               disabled={isLoading}
             >
               {isLoading && <LoaderIcon className="size-4 animate-spin" />}
-              Load
+              {currentStyleUrl ? 'Apply' : 'Load'}
             </Button>
           </Field>
           <Field className="gap-2">

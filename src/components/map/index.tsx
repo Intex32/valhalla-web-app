@@ -32,13 +32,17 @@ import OSMIcon from '@/images/osm_icon.png';
 import { ToolButton } from './parts/tool-button';
 
 import { MapStyleControl } from './map-style-control';
-import { getInitialMapStyle, getCustomStyle, getMapStyleUrl } from './utils';
+import {
+  getInitialMapStyle,
+  getCustomStyleSource,
+  getMapStyleUrl,
+} from './utils';
 import {
   CLICK_DELAY_MS,
   DEFAULT_MAP_STYLE_ID,
   DOUBLE_TAP_THRESHOLD_MS,
 } from './constants';
-import type { MapStyleType } from './types';
+import type { MapStyleSource, MapStyleType } from './types';
 import { RouteLines } from './parts/route-lines';
 import {
   RouteSegmentMetrics,
@@ -168,17 +172,17 @@ export const MapComponent = () => {
   const [currentMapStyle, setCurrentMapStyle] = useState<MapStyleType>(
     getInitialMapStyle(style)
   );
-  const [customStyleData, setCustomStyleData] =
-    useState<maplibregl.StyleSpecification | null>(() => getCustomStyle());
+  const [customStyleSource, setCustomStyleSource] =
+    useState<MapStyleSource | null>(() => getCustomStyleSource());
 
   const resolvedMapStyle = useMemo(() => {
     if (currentMapStyle === 'custom') {
-      return customStyleData ?? getMapStyleUrl('shortbread');
+      return customStyleSource ?? getMapStyleUrl(DEFAULT_MAP_STYLE_ID);
     }
     return getMapStyleUrl(currentMapStyle);
   }, [
     currentMapStyle,
-    customStyleData,
+    customStyleSource,
   ]) as unknown as maplibregl.StyleSpecification;
 
   const mapRef = useRef<MapRef>(null);
@@ -221,17 +225,14 @@ export const MapComponent = () => {
     window.history.replaceState({}, '', url.toString());
   }, []);
 
-  const handleCustomStyleLoaded = useCallback(
-    (styleData: maplibregl.StyleSpecification) => {
-      setCustomStyleData(styleData);
-      setCurrentMapStyle('custom');
+  const selectCustomStyle = useCallback((source: MapStyleSource) => {
+    setCustomStyleSource(source);
+    setCurrentMapStyle('custom');
 
-      const url = new URL(window.location.href);
-      url.searchParams.set('style', 'custom');
-      window.history.replaceState({}, '', url.toString());
-    },
-    []
-  );
+    const url = new URL(window.location.href);
+    url.searchParams.set('style', 'custom');
+    window.history.replaceState({}, '', url.toString());
+  }, []);
 
   const updateExcludePolygons = useCallback(() => {
     if (!drawRef.current) return;
@@ -967,9 +968,10 @@ export const MapComponent = () => {
         <GeolocateControl onError={handleGeolocateError} />
         <DrawControl onUpdate={updateExcludePolygons} controlRef={drawRef} />
         <MapStyleControl
-          customStyleData={customStyleData}
+          customStyleData={customStyleSource}
           onStyleChange={handleStyleChange}
-          onCustomStyleLoaded={handleCustomStyleLoaded}
+          onCustomStyleLoaded={selectCustomStyle}
+          onCustomStyleUrlLoaded={selectCustomStyle}
         />
         <RouteLines />
         <RouteSegmentMetrics />

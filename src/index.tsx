@@ -4,6 +4,9 @@ import './index.css'; // postCSS import of CSS module
 import { RouterProvider } from '@tanstack/react-router';
 import * as TanStackQueryProvider from './lib/tanstack-query/root-provider';
 import { router } from './routes';
+import { registerPMTilesProtocol } from './utils/pmtiles-protocol';
+
+registerPMTilesProtocol();
 
 const TanStackQueryProviderContext = TanStackQueryProvider.getContext();
 

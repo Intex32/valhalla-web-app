@@ -9,8 +9,10 @@ import {
   DEFAULT_MAP_STYLE_ID,
   MAP_STYLE_STORAGE_KEY,
   CUSTOM_STYLE_STORAGE_KEY,
+  CUSTOM_STYLE_URL_STORAGE_KEY,
+  CUSTOM_STYLE_NAME_STORAGE_KEY,
 } from './constants';
-import type { MapStyleType } from './types';
+import type { MapStyleSource, MapStyleType } from './types';
 
 export const LAST_CENTER_KEY = 'last_center';
 
@@ -29,12 +31,14 @@ const isBuiltInStyle = (value: unknown): value is MapStyleType =>
   (MAP_STYLE_IDS.includes(value as (typeof MAP_STYLE_IDS)[number]) ||
     value === 'custom');
 
+const hasCustomStyle = (): boolean =>
+  !!localStorage.getItem(CUSTOM_STYLE_URL_STORAGE_KEY) ||
+  !!localStorage.getItem(CUSTOM_STYLE_STORAGE_KEY);
+
 export const getInitialMapStyle = (urlValue?: string): MapStyleType => {
   if (isBuiltInStyle(urlValue)) {
     if (urlValue === 'custom') {
-      const customStyle = localStorage.getItem(CUSTOM_STYLE_STORAGE_KEY);
-      if (customStyle) return 'custom';
-      return DEFAULT_MAP_STYLE_ID;
+      return hasCustomStyle() ? 'custom' : DEFAULT_MAP_STYLE_ID;
     }
     return urlValue;
   }
@@ -42,9 +46,8 @@ export const getInitialMapStyle = (urlValue?: string): MapStyleType => {
   const savedStyle = localStorage.getItem(MAP_STYLE_STORAGE_KEY);
   const parsed = mapStyleSchema.safeParse(savedStyle);
 
-  if (parsed.data === 'custom') {
-    const customStyle = localStorage.getItem(CUSTOM_STYLE_STORAGE_KEY);
-    if (!customStyle) return DEFAULT_MAP_STYLE_ID;
+  if (parsed.data === 'custom' && !hasCustomStyle()) {
+    return DEFAULT_MAP_STYLE_ID;
   }
 
   return parsed.success ? (parsed.data as MapStyleType) : DEFAULT_MAP_STYLE_ID;
@@ -58,6 +61,54 @@ export const getCustomStyle = (): maplibregl.StyleSpecification | null => {
   } catch {
     return null;
   }
+};
+
+export const getCustomStyleUrl = (): string | null =>
+  localStorage.getItem(CUSTOM_STYLE_URL_STORAGE_KEY);
+
+export const getCustomStyleName = (): string | null =>
+  localStorage.getItem(CUSTOM_STYLE_NAME_STORAGE_KEY);
+
+/** The custom slot as MapLibre wants it — a URL if one is set, else the inlined spec. */
+export const getCustomStyleSource = (): MapStyleSource | null =>
+  getCustomStyleUrl() ?? getCustomStyle();
+
+/** Label for the custom slot: the style's own name, falling back to its host. */
+export const getCustomStyleLabel = (
+  source: MapStyleSource | null
+): string | null => {
+  if (!source) return null;
+  if (typeof source !== 'string') return source.name || 'Custom';
+
+  const storedName = getCustomStyleName();
+  if (storedName) return storedName;
+  try {
+    return new URL(source, window.location.href).hostname;
+  } catch {
+    return 'Custom';
+  }
+};
+
+export const saveCustomStyleUrl = (url: string, name?: string): void => {
+  localStorage.setItem(CUSTOM_STYLE_URL_STORAGE_KEY, url);
+  // An inlined spec left behind from a previous file pick would shadow nothing,
+  // but it would go stale and bloat localStorage, so drop it.
+  localStorage.removeItem(CUSTOM_STYLE_STORAGE_KEY);
+  if (name) {
+    localStorage.setItem(CUSTOM_STYLE_NAME_STORAGE_KEY, name);
+  } else {
+    localStorage.removeItem(CUSTOM_STYLE_NAME_STORAGE_KEY);
+  }
+  localStorage.setItem(MAP_STYLE_STORAGE_KEY, 'custom');
+};
+
+export const saveCustomStyleSpec = (
+  style: maplibregl.StyleSpecification
+): void => {
+  localStorage.setItem(CUSTOM_STYLE_STORAGE_KEY, JSON.stringify(style));
+  localStorage.removeItem(CUSTOM_STYLE_URL_STORAGE_KEY);
+  localStorage.removeItem(CUSTOM_STYLE_NAME_STORAGE_KEY);
+  localStorage.setItem(MAP_STYLE_STORAGE_KEY, 'custom');
 };
 
 export const convertDDToDMS = (decimalDegrees: number): string => {

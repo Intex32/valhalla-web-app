@@ -18,7 +18,7 @@ Three themes run through all of it:
 | [Multi-target routing](multi-target-routing.md) | Routing several profiles against several Valhalla servers at once, and what a _target_ is                      |
 | [Costing settings](costing-settings.md)         | Why options are opt-in, per-target tuning, and settings import/export                                          |
 | [Cost visualisation](cost-visualisation.md)     | Route, maneuver, per-edge and per-junction cost, and the segment-metrics debugging view                        |
-| [Other changes](other-changes.md)               | Dev CORS proxy, alternate-route legibility, camera behaviour                                                   |
+| [Other changes](other-changes.md)               | Dev CORS proxies, map styles, alternate-route legibility, camera behaviour                                     |
 
 > These documents are the **what and the why**. Implementation detail lives in [`CLAUDE.md`](../CLAUDE.md).
 

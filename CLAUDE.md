@@ -37,6 +37,7 @@ Husky `pre-commit` runs `npm run typecheck && npx lint-staged` (eslint --fix on 
 - **Zustand** + `immer` + `devtools` middleware for client state (5 stores in `src/stores/`)
 - **Tailwind CSS v4** via `@tailwindcss/vite` + **shadcn/ui** (style `new-york`, base `slate`, lucide icons; see `components.json`)
 - **maplibre-gl** + **react-map-gl** + `@watergis/maplibre-gl-terradraw` for drawing exclude-polygons
+- **pmtiles** — registers the `pmtiles://` protocol with MapLibre (see "Map styles")
 - **react-day-picker** (used by the shadcn `Calendar` primitive that powers the date/time button)
 - **date-fns** for formatting
 - **zod** for env/search-param/URL validation
@@ -136,6 +137,21 @@ Server-state lives in TanStack Query. The global `QueryClient` (`src/lib/tanstac
 - `src/components/ui/` — shadcn/ui primitives (do not rename — they're tracked by `components.json`). `date-time-button.tsx` and `calendar.tsx` are the QuickSettings building blocks.
 - `src/components/types.ts` — shared `PossibleSettings`, `ActiveWaypoint`, Valhalla response types.
 
+### Map styles
+
+`MAP_STYLES` in `src/components/map/constants.ts` is the list the layers popover (`map-style-control.tsx`) offers: three upstream styles, then **Krawana Light** and **Krawana Dark**, our own base map. `shortbread` stays the default. The chosen id goes into the `style` search param, so a permalink carries it, and into `localStorage['selectedMapStyle']`.
+
+Below the built-ins sits one **custom** slot, which holds _either_ form MapLibre's `mapStyle` accepts — that choice is what `MapStyleSource` (`types.ts`) names:
+
+- a **URL** in `localStorage['customMapStyleUrl']`, with the style's own `name` cached beside it for the picker's label. MapLibre refetches it on every load, so edits on the style server show up without reloading anything here. This is what the dialog's **Style URL** field writes, and reopening the dialog prefills it with the URL in use — editing the URL by hand is the point.
+- an inlined spec in `localStorage['customMapStyle']`, the only option for a style picked off disk. Only this form gets the JSON editor (`edit-styles-dialog.tsx`); a URL-backed style has no local copy to edit.
+
+The two are mutually exclusive — `saveCustomStyleUrl()` / `saveCustomStyleSpec()` in `utils.ts` each clear the other key, and `getCustomStyleSource()` resolves whichever is set. The URL field accepts a same-origin path as well as an absolute URL, which is how a style behind the dev proxy or one we bundle in `public/styles/` can be reached.
+
+Our base map is a **PMTiles archive**, not a tile endpoint, so MapLibre needs the `pmtiles://` protocol registered before the first map mounts — `registerPMTilesProtocol()` in `src/utils/pmtiles-protocol.ts`, called from `src/index.tsx`. Without it the style loads and renders nothing.
+
+It also **sends no `Access-Control-Allow-Origin`**, so a browser refuses the style, its sprites, its glyphs and its PMTiles ranges alike. Dev goes through the Vite proxy (see "Dev proxy" below) and `BASE_MAP_URL` points at `/base-map/prod/v1`; a production build talks to `https://base-map.blaulichtnavi.de/prod/v1` directly, **which needs that header set on the style server**. `VITE_BASE_MAP_URL` overrides either.
+
 ### Backend integration
 
 - **Valhalla base URL**: `getBaseUrl()` in `src/utils/base-url.ts` reads `localStorage['valhalla_base_url']` first, then falls back to `VITE_VALHALLA_URL`. The settings panel lets users override and `testConnection()` validates by hitting `/status` and checking `available_actions` includes `route` and `isochrone`.
@@ -160,6 +176,7 @@ All build-time, prefixed `VITE_`. Defined in `.env`, typed in `src/vite-env.d.ts
 | `VITE_CENTER_COORDS`         | Initial map center `"lat,lng"`                                                             |
 | `VITE_DEFAULT_COSTING_MODEL` | Default profile (auto/bicycle/pedestrian/car/truck/bus/motor_scooter/motorcycle/emergency) |
 | `VITE_CLIENT_ID`             | Sent as `X-Client-Id` on Valhalla requests                                                 |
+| `VITE_BASE_MAP_URL`          | Base URL of our own map styles; defaults to the dev proxy in dev, the live host in a build |
 
 ## Deployment
 

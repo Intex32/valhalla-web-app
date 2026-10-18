@@ -63,7 +63,7 @@ describe('CustomStylesDialog', () => {
     );
 
     expect(
-      screen.getByText(/load custom styles from a URL or a local file/i)
+      screen.getByText(/point the map at any MapLibre style\.json by URL/i)
     ).toBeInTheDocument();
   });
 
@@ -76,7 +76,7 @@ describe('CustomStylesDialog', () => {
       screen.getByRole('button', { name: 'Load custom styles' })
     );
 
-    expect(screen.getByLabelText('Load from URL')).toBeInTheDocument();
+    expect(screen.getByLabelText('Style URL')).toBeInTheDocument();
   });
 
   it('should have Load button', async () => {
@@ -113,11 +113,13 @@ describe('CustomStylesDialog', () => {
     await user.click(
       screen.getByRole('button', { name: 'Load custom styles' })
     );
-    await user.type(screen.getByLabelText('Load from URL'), 'not-a-url');
+    await user.type(screen.getByLabelText('Style URL'), 'not-a-url');
     await user.click(screen.getByRole('button', { name: 'Load' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Please enter a valid URL')).toBeInTheDocument();
+      expect(
+        screen.getByText('Enter an absolute URL, or a path starting with /')
+      ).toBeInTheDocument();
     });
   });
 
@@ -129,25 +131,24 @@ describe('CustomStylesDialog', () => {
     await user.click(
       screen.getByRole('button', { name: 'Load custom styles' })
     );
-    await user.type(screen.getByLabelText('Load from URL'), 'not-a-url');
+    await user.type(screen.getByLabelText('Style URL'), 'not-a-url');
     await user.click(screen.getByRole('button', { name: 'Load' }));
 
+    const errorText = 'Enter an absolute URL, or a path starting with /';
     await waitFor(() => {
-      expect(screen.getByText('Please enter a valid URL')).toBeInTheDocument();
+      expect(screen.getByText(errorText)).toBeInTheDocument();
     });
 
-    await user.type(screen.getByLabelText('Load from URL'), 'https://');
+    await user.type(screen.getByLabelText('Style URL'), 'https://');
 
     await waitFor(() => {
-      expect(
-        screen.queryByText('Please enter a valid URL')
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(errorText)).not.toBeInTheDocument();
     });
   });
 
-  it('should handle successful URL fetch', async () => {
+  it('should report the URL and style name on successful URL fetch', async () => {
     const user = userEvent.setup();
-    const onStyleLoaded = vi.fn();
+    const onStyleUrlLoaded = vi.fn();
     const mockStyle = {
       version: 8,
       name: 'Test Style',
@@ -160,23 +161,26 @@ describe('CustomStylesDialog', () => {
       json: () => Promise.resolve(mockStyle),
     });
 
-    render(<CustomStylesDialog onStyleLoaded={onStyleLoaded} />);
+    render(<CustomStylesDialog onStyleUrlLoaded={onStyleUrlLoaded} />);
 
     await user.click(
       screen.getByRole('button', { name: 'Load custom styles' })
     );
     await user.type(
-      screen.getByLabelText('Load from URL'),
+      screen.getByLabelText('Style URL'),
       'https://example.com/style.json'
     );
     await user.click(screen.getByRole('button', { name: 'Load' }));
 
     await waitFor(() => {
-      expect(onStyleLoaded).toHaveBeenCalledWith(mockStyle);
+      expect(onStyleUrlLoaded).toHaveBeenCalledWith(
+        'https://example.com/style.json',
+        'Test Style'
+      );
     });
   });
 
-  it('should save style to localStorage on successful load', async () => {
+  it('should store the URL rather than a snapshot of the style', async () => {
     const user = userEvent.setup();
     const mockStyle = {
       version: 8,
@@ -196,7 +200,7 @@ describe('CustomStylesDialog', () => {
       screen.getByRole('button', { name: 'Load custom styles' })
     );
     await user.type(
-      screen.getByLabelText('Load from URL'),
+      screen.getByLabelText('Style URL'),
       'https://example.com/style.json'
     );
     await user.click(screen.getByRole('button', { name: 'Load' }));
@@ -207,6 +211,53 @@ describe('CustomStylesDialog', () => {
         'custom'
       );
     });
+
+    expect(mockLocalStorage['customMapStyleUrl']).toBe(
+      'https://example.com/style.json'
+    );
+    expect(mockLocalStorage['customMapStyleName']).toBe('Test Style');
+    expect(mockLocalStorage['customMapStyle']).toBeUndefined();
+  });
+
+  it('should accept a same-origin path', async () => {
+    const user = userEvent.setup();
+    const onStyleUrlLoaded = vi.fn();
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ version: 8, sources: {}, layers: [] }),
+    });
+
+    render(<CustomStylesDialog onStyleUrlLoaded={onStyleUrlLoaded} />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Load custom styles' })
+    );
+    await user.type(screen.getByLabelText('Style URL'), '/styles/carto.json');
+    await user.click(screen.getByRole('button', { name: 'Load' }));
+
+    await waitFor(() => {
+      expect(onStyleUrlLoaded).toHaveBeenCalledWith(
+        '/styles/carto.json',
+        undefined
+      );
+    });
+  });
+
+  it('should prefill the field with the style URL in use', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CustomStylesDialog currentStyleUrl="https://example.com/in-use.json" />
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: 'Edit custom style URL' })
+    );
+
+    expect(screen.getByLabelText('Style URL')).toHaveValue(
+      'https://example.com/in-use.json'
+    );
   });
 
   it('should show error for invalid style format', async () => {
@@ -224,7 +275,7 @@ describe('CustomStylesDialog', () => {
       screen.getByRole('button', { name: 'Load custom styles' })
     );
     await user.type(
-      screen.getByLabelText('Load from URL'),
+      screen.getByLabelText('Style URL'),
       'https://example.com/style.json'
     );
     await user.click(screen.getByRole('button', { name: 'Load' }));
@@ -251,7 +302,7 @@ describe('CustomStylesDialog', () => {
       screen.getByRole('button', { name: 'Load custom styles' })
     );
     await user.type(
-      screen.getByLabelText('Load from URL'),
+      screen.getByLabelText('Style URL'),
       'https://example.com/style.json'
     );
     await user.click(screen.getByRole('button', { name: 'Load' }));

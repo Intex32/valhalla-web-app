@@ -7,19 +7,21 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { CustomStylesDialog } from './custom-styles-dialog';
 import { EditStylesDialog } from './edit-styles-dialog';
 import { MAP_STYLES, MAP_STYLE_STORAGE_KEY } from './constants';
-import type { MapStyleType } from './types';
-import { getInitialMapStyle } from './utils';
+import type { MapStyleSource, MapStyleType } from './types';
+import { getCustomStyleLabel, getInitialMapStyle } from './utils';
 
 interface MapStyleControlProps {
-  customStyleData: maplibregl.StyleSpecification | null;
+  /** The custom slot: a style URL, an inlined spec, or nothing loaded yet. */
+  customStyleData: MapStyleSource | null;
   onStyleChange?: (style: MapStyleType) => void;
   onCustomStyleLoaded?: (styleData: maplibregl.StyleSpecification) => void;
+  onCustomStyleUrlLoaded?: (url: string, name?: string) => void;
 }
 
 interface MapStyleOptionProps {
   id: MapStyleType;
   label: string;
-  style: maplibregl.StyleSpecification;
+  style: MapStyleSource;
   isSelected: boolean;
   onSelect: (id: MapStyleType) => void;
   mapCenter: { lng: number; lat: number } | undefined;
@@ -86,6 +88,7 @@ export const MapStyleControl = ({
   customStyleData,
   onStyleChange,
   onCustomStyleLoaded,
+  onCustomStyleUrlLoaded,
 }: MapStyleControlProps) => {
   const [selectedStyle, setSelectedStyle] =
     useState<MapStyleType>(getInitialMapStyle);
@@ -105,19 +108,19 @@ export const MapStyleControl = ({
     const options: Array<{
       id: MapStyleType;
       label: string;
-      style: maplibregl.StyleSpecification;
+      style: MapStyleSource;
       isSelected: boolean;
     }> = MAP_STYLES.map((mapStyle) => ({
       id: mapStyle.id,
       label: mapStyle.label,
-      style: mapStyle.style as unknown as maplibregl.StyleSpecification,
+      style: mapStyle.style,
       isSelected: selectedStyle === mapStyle.id,
     }));
 
     if (customStyleData) {
       options.push({
         id: 'custom',
-        label: customStyleData.name || 'Custom',
+        label: getCustomStyleLabel(customStyleData) ?? 'Custom',
         style: customStyleData,
         isSelected: selectedStyle === 'custom',
       });
@@ -126,13 +129,18 @@ export const MapStyleControl = ({
     return options;
   }, [selectedStyle, customStyleData]);
 
+  const customStyleUrl =
+    typeof customStyleData === 'string' ? customStyleData : null;
+
   return (
     <CustomControl position="topRight">
       <Popover>
         <PopoverTrigger asChild>
           <ControlButton title="Map Styles" icon={<LayersIcon size={17} />} />
         </PopoverTrigger>
-        <PopoverContent className="mt-1 mr-2 rounded-md animate-in fade-in-0 zoom-in-95 w-[266px]">
+        {/* The list outgrows a short viewport once a few styles are in it, so
+            it scrolls within whatever room Radix measured below the button. */}
+        <PopoverContent className="mt-1 mr-2 max-h-[calc(var(--radix-popover-content-available-height)-0.5rem)] w-[266px] overflow-y-auto rounded-md animate-in fade-in-0 zoom-in-95">
           <div className="space-y-2">
             <div className="flex flex-col gap-2.5">
               {mapOptions.map((mapOption) => (
@@ -148,19 +156,28 @@ export const MapStyleControl = ({
                 />
               ))}
               <CustomStylesDialog
+                currentStyleUrl={customStyleUrl}
                 onStyleLoaded={(styleData) => {
                   setSelectedStyle('custom');
                   onCustomStyleLoaded?.(styleData);
                 }}
+                onStyleUrlLoaded={(url, name) => {
+                  setSelectedStyle('custom');
+                  onCustomStyleUrlLoaded?.(url, name);
+                }}
               />
-              {customStyleData && selectedStyle === 'custom' && (
-                <EditStylesDialog
-                  styleData={customStyleData}
-                  onStyleSaved={(styleData) => {
-                    onCustomStyleLoaded?.(styleData);
-                  }}
-                />
-              )}
+              {/* A URL-backed custom style has no local JSON to edit — its
+                  source lives on the style server. */}
+              {customStyleData &&
+                typeof customStyleData !== 'string' &&
+                selectedStyle === 'custom' && (
+                  <EditStylesDialog
+                    styleData={customStyleData}
+                    onStyleSaved={(styleData) => {
+                      onCustomStyleLoaded?.(styleData);
+                    }}
+                  />
+                )}
             </div>
           </div>
         </PopoverContent>

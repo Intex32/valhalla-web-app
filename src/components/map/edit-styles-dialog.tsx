@@ -13,7 +13,7 @@ import {
 import { Button } from '../ui/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '../ui/field';
 import { Textarea } from '../ui/textarea';
-import { CUSTOM_STYLE_STORAGE_KEY, MAP_STYLE_STORAGE_KEY } from './constants';
+import { saveCustomStyleSpec } from './utils';
 
 const mapStyleSchema = z.object({
   version: z.number(),
@@ -55,12 +55,7 @@ export const EditStylesDialog = ({
 
       const validStyle = parsed as maplibregl.StyleSpecification;
 
-      localStorage.setItem(
-        CUSTOM_STYLE_STORAGE_KEY,
-        JSON.stringify(validStyle)
-      );
-      localStorage.setItem(MAP_STYLE_STORAGE_KEY, 'custom');
-
+      saveCustomStyleSpec(validStyle);
       onStyleSaved?.(validStyle);
       setDialogOpen(false);
     } catch {

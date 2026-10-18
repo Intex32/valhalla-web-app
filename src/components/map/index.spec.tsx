@@ -278,6 +278,7 @@ vi.mock('./parts/tiles-info-popup', () => ({
 vi.mock('./utils', () => ({
   getInitialMapStyle: vi.fn(() => 'shortbread'),
   getCustomStyle: vi.fn(() => null),
+  getCustomStyleSource: vi.fn(() => null),
   getMapStyleUrl: vi.fn((style: string) => `https://example.com/${style}.json`),
   getInitialMapPosition: vi.fn(() => ({
     center: [13.4, 52.5],
