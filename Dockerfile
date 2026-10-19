@@ -24,8 +24,8 @@ ARG VITE_VALHALLA_URL
 ARG VITE_CLIENT_ID
 LABEL org.opencontainers.image.source="https://github.com/Intex32/valhalla-web-app"
 LABEL org.opencontainers.image.revision="$SOURCE_REVISION"
-LABEL dev.heimann.valhalla-url="$VITE_VALHALLA_URL"
-LABEL dev.heimann.client-id="$VITE_CLIENT_ID"
+LABEL de.blaulichtnavi.valhalla-url="$VITE_VALHALLA_URL"
+LABEL de.blaulichtnavi.client-id="$VITE_CLIENT_ID"
 
 COPY --from=builder /app/build /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
