@@ -71,7 +71,7 @@ jobs:
           # The Dockerfile sets the source and revision labels.
           labels: |
             org.opencontainers.image.created=${{ steps.metadata.outputs.created }}
-            dev.heimann.commit-date=${{ steps.metadata.outputs.commit-date }}
+            de.blaulichtnavi.commit-date=${{ steps.metadata.outputs.commit-date }}
           build-args: |
             SOURCE_REVISION=${{ steps.metadata.outputs.revision }}
             VITE_VALHALLA_URL=${{ steps.metadata.outputs.valhalla-url }}
@@ -99,12 +99,12 @@ jobs:
           test "$revision" = "$EXPECTED_REVISION"
 
           valhalla_url="$(docker image inspect \
-            --format '{{ index .Config.Labels "dev.heimann.valhalla-url" }}' \
+            --format '{{ index .Config.Labels "de.blaulichtnavi.valhalla-url" }}' \
             "$IMAGE")"
           test "$valhalla_url" = "$EXPECTED_VALHALLA_URL"
 
           client_id="$(docker image inspect \
-            --format '{{ index .Config.Labels "dev.heimann.client-id" }}' \
+            --format '{{ index .Config.Labels "de.blaulichtnavi.client-id" }}' \
             "$IMAGE")"
           test "$client_id" = "$EXPECTED_CLIENT_ID"
 
